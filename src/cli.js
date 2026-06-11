@@ -4,6 +4,7 @@ const versionCommand = require('./commands/version.js');
 const doctorCommand = require('./commands/doctor.js');
 const tuiCommand = require('./commands/tui.js');
 const webCommand = require('./commands/web.js');
+const daemonCommand = require('./commands/daemon.js');
 
 const HELP_TEXT = `BlueNote distribution CLI
 
@@ -52,6 +53,10 @@ async function run(args, io) {
 
   if (argv[0] === 'web') {
     return webCommand.run(argv.slice(1), streams);
+  }
+
+  if (argv[0] === 'daemon') {
+    return daemonCommand.run(argv.slice(1), streams);
   }
 
   if (COMMANDS.indexOf(argv[0]) !== -1) {
