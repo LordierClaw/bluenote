@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved baseline for BN-INSTALL-ARCH-001.
+Approved baseline for BN-INSTALL-ARCH-001. Expanded after approval to include real daemon start/status/stop and runnable client daemon-mode usability in the same implementation pass.
 
 ## Problem
 
@@ -17,6 +17,8 @@ The previous distribution CLI work proved that sibling repositories can be compo
 - Keep client packages optional; installing the distribution CLI must not require installing WebUI, TUI, Bun, or OpenTUI.
 - Preserve Linux and Windows compatibility by avoiding shell-specific linking assumptions.
 - Verify with real manual local install testing in an isolated temporary environment, not only unit tests.
+- Provide a minimal real local daemon that can be started, checked, stopped, and used by distribution-launched clients.
+- Make installed CLI/WebUI/TUI client surfaces runnable against the daemon in the manual verification environment.
 
 ## Non-goals
 
@@ -264,6 +266,7 @@ Versioned docs may document the official install behavior and the requirement fo
 - Add localhost HTTP health/version/capabilities endpoints.
 - Keep daemon local-only and single-user.
 - Add lifecycle cleanup and stale process handling.
+- Include enough daemon API surface for installed clients to prove they are connected to the daemon without direct storage access.
 
 ### Milestone 3: client daemon mode
 
@@ -271,6 +274,15 @@ Versioned docs may document the official install behavior and the requirement fo
 - Make TUI accept daemon environment variables and flags.
 - Route normal launched client mode through daemon HTTP API.
 - Keep direct storage access out of normal client launch paths.
+
+For this implementation, "usable" means a clean install can:
+
+- start the daemon,
+- show daemon status and health,
+- run `bluenote doctor` with daemon/client status,
+- launch WebUI in daemon mode and observe a successful daemon health/capability check,
+- launch TUI in daemon mode far enough to verify daemon connection/runtime readiness without relying on fragile full-screen manual interaction in automated checks,
+- stop the daemon and clean up all temporary manual-test state.
 
 ## Open risks
 

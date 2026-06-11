@@ -2,9 +2,9 @@
 
 > **For implementer:** Use TDD throughout. Write failing tests first. Watch them fail. Then implement. Keep manual verification artifacts local-only; do not commit temp-prefix logs, cleanup scripts, machine-specific paths, or one-off QA transcripts.
 
-**Goal:** Make the BlueNote distribution CLI model installable as an end-user global npm package that discovers optional globally installed `bluenote-webui` and `bluenote-term` clients through PATH/package resolution, reports them in `doctor`, and verifies the flow manually in an isolated temporary npm prefix.
+**Goal:** Make the BlueNote distribution CLI model installable as an end-user global npm package that discovers optional globally installed `bluenote-webui` and `bluenote-term` clients through PATH/package resolution, runs a minimal real local daemon, launches clients against that daemon, reports everything in `doctor`, and verifies the flow manually in an isolated temporary npm prefix.
 
-**Architecture:** Option B only. `@lordierclaw/bluenote` is the distribution CLI/daemon entrypoint and does not require WebUI/TUI as bundled dependencies in release mode. Optional clients expose stable public executables named `bluenote-webui` and `bluenote-term`; `bluenote` discovers those executables on PATH and launches them only after a daemon endpoint is available. Manual verification uses a temporary npm prefix and temporary BlueNote config/data/cache roots, with cleanup proof kept outside git.
+**Architecture:** Option B only. `@lordierclaw/bluenote` is the distribution CLI/daemon entrypoint and does not require WebUI/TUI as bundled dependencies in release mode. Optional clients expose stable public executables named `bluenote-webui` and `bluenote-term`; `bluenote` discovers those executables on PATH and launches them only after a daemon endpoint is available. The daemon is a local HTTP process with random/free port, token metadata, health/capabilities endpoints, start/status/stop commands, and enough API surface for clients to prove daemon connectivity. Manual verification uses a temporary npm prefix and temporary BlueNote config/data/cache roots, with cleanup proof kept outside git.
 
 **Tech Stack:** Node `>=16.14 <17 || >=18`, npm 8-compatible packages, Bun/OpenTUI for TUI only, TypeScript, existing Node-based CLI contract tests, Vitest in client repos.
 
@@ -250,6 +250,94 @@ git add src/commands/web.ts src/commands/tui.ts src/utils/daemon-state.ts tests/
 
 ---
 
+## Task 3A: Implement minimal real daemon lifecycle and HTTP health API
+
+**Files:**
+
+- Modify: `src/commands/daemon.ts`
+- Modify: `src/utils/daemon-state.ts`
+- Create: `src/daemon/server.ts`
+- Create: `src/daemon/paths.ts`
+- Create: `src/daemon/token.ts`
+- Modify: `tests/run-tests.js`
+
+**Behavior:**
+
+Implement a local-only daemon that can be started, queried, and stopped by the distribution CLI. The daemon owns the first real HTTP API surface that clients can use to prove daemon connectivity.
+
+Minimum API:
+
+- `GET /health` returns JSON `{ ok: true, name: "bluenote-daemon", version }`.
+- `GET /capabilities` returns JSON with at least daemon version, local-only mode, and client capability hints.
+- All non-health endpoints require the token when introduced; health may remain tokenless only if no secrets are returned.
+
+State:
+
+- Use localhost `127.0.0.1` and an OS-assigned/random free port.
+- Store daemon metadata in a user config/state location that can be overridden in tests/manual verification with environment variables.
+- Metadata includes `pid`, `url`, `token`, `startedAt`, and version.
+- `doctor` and client-launch commands consume this metadata.
+- Tokens must never be printed.
+
+Lifecycle:
+
+- `bluenote daemon start` starts the daemon detached enough for the command to return after health is ready.
+- `bluenote daemon status` reports running/stopped/stale/unreachable accurately.
+- `bluenote daemon stop` stops the daemon and removes/stales metadata.
+- Stale PID/metadata is handled without crashing.
+
+**Step 1: Write failing tests**
+
+Add tests that assert:
+
+- `daemon status` reports stopped before start.
+- `daemon start` creates metadata with url/token/pid but does not print token.
+- `daemon status` reports running after start and verifies health.
+- `daemon stop` stops the process and status returns stopped.
+- stale metadata is reported as stale/unreachable and can be cleaned.
+- Node 16.14 can run `daemon status` and health metadata parsing.
+
+Use temporary config/state paths in tests and clean up child processes.
+
+**Step 2: Run test — confirm it fails**
+
+Command:
+
+```sh
+npm run test
+```
+
+Expected: FAIL because daemon commands are scaffold-only.
+
+**Step 3: Implement minimal daemon**
+
+Implement the smallest Node 16-compatible HTTP daemon and lifecycle helpers. Avoid heavy frameworks.
+
+**Step 4: Run tests and smoke daemon manually**
+
+Commands:
+
+```sh
+npm run test
+npm run build
+node dist/bin.js daemon status
+node dist/bin.js daemon start
+node dist/bin.js daemon status
+node dist/bin.js doctor
+node dist/bin.js daemon stop
+node dist/bin.js daemon status
+```
+
+Expected: PASS; no token printed.
+
+**Step 5: Commit**
+
+```sh
+git add src/commands/daemon.ts src/utils/daemon-state.ts src/daemon tests/run-tests.js && git commit -m "feat: implement local daemon lifecycle"
+```
+
+---
+
 ## Task 4: Add stable `bluenote-webui` bin to WebUI package
 
 **Files:**
@@ -267,6 +355,7 @@ The bin should:
 - call the existing public WebUI command API,
 - support `--help`,
 - accept daemon flags `--daemon-url` and `--daemon-token` for manual testing even if full daemon mode is implemented later,
+- perform a daemon health/capabilities check when daemon flags or environment variables are present, and expose a non-browser smoke mode such as `--check-daemon` for manual verification,
 - preserve existing dev/start behavior.
 
 **Step 1: Write failing tests**
@@ -276,6 +365,7 @@ Add or extend tests that assert:
 - `package.json` has `bin.bluenote-webui`.
 - The command parser accepts `--daemon-url` and `--daemon-token` without crashing.
 - `--help` still prints WebUI usage.
+- `--check-daemon --daemon-url <url> --daemon-token <token>` returns success when the daemon health/capabilities endpoint is reachable and failure when it is not.
 
 **Step 2: Run test — confirm it fails**
 
@@ -326,6 +416,7 @@ The bin should:
 
 - delegate to the existing `runTuiCommand(args)` public API,
 - accept daemon flags `--daemon-url` and `--daemon-token` for manual testing / future daemon mode,
+- perform a daemon health/capabilities check when daemon flags or environment variables are present, and expose a non-fullscreen smoke mode such as `--check-daemon` for manual verification,
 - preserve existing `bn` / `bluenote` compatibility if currently required by the package.
 
 **Step 1: Write failing tests**
@@ -334,6 +425,7 @@ Add or extend tests that assert:
 
 - `packages/term/package.json` has `bin.bluenote-term`.
 - The command API accepts daemon flags without crashing.
+- The command API can run `--check-daemon` against a fake daemon endpoint without launching the full-screen TUI.
 - Existing bin behavior remains compatible.
 
 **Step 2: Run test — confirm it fails**
@@ -500,8 +592,11 @@ Verify after each install stage:
 ```sh
 bluenote version
 bluenote doctor
+bluenote daemon start
+bluenote daemon status
 bluenote web
 bluenote tui
+bluenote daemon stop
 ```
 
 Expected:
@@ -509,7 +604,9 @@ Expected:
 - before clients: doctor reports both clients missing but exits successfully on supported Node,
 - after WebUI install: doctor reports WebUI found,
 - after TUI install: doctor reports TUI found and Bun readiness accurately,
-- web/tui fail with clear daemon-start guidance until daemon exists/runs.
+- before daemon start, web/tui fail with clear daemon-start guidance,
+- after daemon start, web/tui launch/check their installed client executables with daemon environment handoff,
+- daemon status reports running while started and stopped after stop.
 
 **Step 5: Cleanup and prove clean state**
 
