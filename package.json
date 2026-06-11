@@ -10,7 +10,7 @@
     "node": ">=16.14"
   },
   "scripts": {
-    "test": "node tests/cli-help.test.js",
+    "test": "node tests/cli-help.test.js && node tests/version.test.js",
     "check": "npm test"
   }
 }

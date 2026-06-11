@@ -1,5 +1,7 @@
 'use strict';
 
+const versionCommand = require('./commands/version.js');
+
 const HELP_TEXT = `BlueNote distribution CLI
 
 Usage: bluenote [command] [options]
@@ -31,6 +33,10 @@ async function run(args, io) {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
     write(stdout, HELP_TEXT);
     return 0;
+  }
+
+  if (argv[0] === 'version') {
+    return versionCommand.run(argv.slice(1), streams);
   }
 
   if (COMMANDS.indexOf(argv[0]) !== -1) {
