@@ -13,17 +13,17 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 
 ## Local dependency strategy
 
-`@lordierclaw/bluenote` composes the sibling packages through public package APIs/bins only:
+`@lordierclaw/bluenote` depends directly on core for daemon-side behavior. Optional clients are installed separately and discovered through public executables on `PATH`:
 
 ```json
 {
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core",
-    "bluenote-term": "file:../bluenote-term/packages/term",
-    "bluenote-webui": "file:../bluenote-webui"
+    "@lordierclaw/bluenote-core": "file:../bluenote-core"
   }
 }
 ```
+
+End-user optional clients are independent global packages exposing `bluenote-webui` and `bluenote-term` executables.
 
 When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches. Do not use branch dependencies such as `#main` for release-like dependency modes.
 
@@ -54,7 +54,7 @@ npm run check
 ## Implemented command surface
 
 - `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
-- `bluenote version`: distribution version plus best-effort sibling package metadata; no heavy client imports.
+- `bluenote version`: distribution version plus required runtime package metadata; no heavy client imports.
 - `bluenote doctor`: platform, Node compatibility, daemon status, optional `bluenote-webui`/`bluenote-term` PATH discovery, and Bun availability; no secrets or workspace mutation.
 - `bluenote daemon start|status|stop`: minimal local-only HTTP daemon lifecycle with `/health` and `/capabilities`; tokens are stored in daemon metadata but never printed.
 - `bluenote web [...args]`: requires daemon metadata, discovers the public `bluenote-webui` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.

@@ -18,9 +18,7 @@
     "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core",
-    "bluenote-term": "file:../bluenote-term/packages/term",
-    "bluenote-webui": "file:../bluenote-webui"
+    "@lordierclaw/bluenote-core": "file:../bluenote-core"
   },
   "devDependencies": {
     "@types/node": "16.18.126",

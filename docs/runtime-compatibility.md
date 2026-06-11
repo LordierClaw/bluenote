@@ -11,9 +11,9 @@
 
 - Keep top-level command routing compatible with Node 16.14.
 - `bluenote --help`, `bluenote version`, and `bluenote doctor` must not import terminal/web client implementation modules.
-- `bluenote tui` resolves the public `bluenote-term` package bin and runs it through Bun. If Bun or the public package is unavailable, it reports a clear actionable error instead of pretending the TUI can run under plain Node 16.14.
-- `bluenote web` lazy-loads the public `bluenote-webui` command API only when the web command is invoked.
-- `bluenote daemon start|status|stop` is scaffold-only until a future cross-repo daemon/runtime/sync design is approved.
+- `bluenote tui` discovers the public `bluenote-term` executable on `PATH` and launches it only after daemon metadata is available. If Bun/client runtime requirements are unavailable, doctor and launch errors must be clear and actionable.
+- `bluenote web` discovers the public `bluenote-webui` executable on `PATH` and launches it only after daemon metadata is available.
+- `bluenote daemon start|status|stop` manages the minimal local-only HTTP daemon lifecycle and must not print tokens.
 - Baseline CI should run on Node 16.14 and should not require Bun for basic distribution smoke commands.
 
 ## Compatibility changes

@@ -140,7 +140,7 @@ Update `runDoctor` to include sections:
 - Clients
 - AI/config placeholder status
 
-For this milestone, daemon status can remain `not implemented` or `stopped/unavailable` if no daemon metadata exists. Client status should use `findCommandOnPath`.
+For this implementation, daemon status should report stopped/running/stale/unreachable from real daemon metadata and health checks. Client status should use `findCommandOnPath`.
 
 **Step 4: Run test — confirm it passes**
 
@@ -307,7 +307,7 @@ Command:
 npm run test
 ```
 
-Expected: FAIL because daemon commands are scaffold-only.
+Expected: FAIL because daemon commands do not yet provide the required real lifecycle behavior.
 
 **Step 3: Implement minimal daemon**
 

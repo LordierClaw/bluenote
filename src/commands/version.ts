@@ -2,13 +2,13 @@ import type { CommandIo } from "../types"
 import { readOwnPackageInfo, resolvePackageJson } from "../utils/package-info"
 import { write } from "../utils/write"
 
-const CLIENT_PACKAGES = ["@lordierclaw/bluenote-core", "bluenote-term", "bluenote-webui"]
+const RUNTIME_PACKAGES = ["@lordierclaw/bluenote-core"]
 
 export function runVersion(_args: string[] = [], io: CommandIo = {}): number {
   const own = readOwnPackageInfo()
   const lines = [`${own.name} ${own.version}`]
 
-  for (const packageName of CLIENT_PACKAGES) {
+  for (const packageName of RUNTIME_PACKAGES) {
     const resolution = resolvePackageJson(packageName)
     lines.push(`${packageName} ${resolution.version || (resolution.resolved ? "version unavailable" : "not installed")}`)
   }

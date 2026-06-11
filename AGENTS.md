@@ -30,10 +30,9 @@ Must remain Node `>=16.14 <17 || >=18` compatible. Lazy-load or spawn heavy/runt
 - Consume `@lordierclaw/bluenote-core`, `bluenote-term`, and `bluenote-webui` through public package exports or public package bins only.
 - Do not import sibling `src/*`, `dist/*`, tests, or hidden internals.
 - If a needed command API does not exist, add it in the owning repo first.
-- Current local dependency names:
+- Current direct dependency name:
   - `@lordierclaw/bluenote-core`: `file:../bluenote-core`
-  - `bluenote-term`: `file:../bluenote-term/packages/term`
-  - `bluenote-webui`: `file:../bluenote-webui`
+- Optional clients are independent global packages discovered through `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
 ## Dependency rules
 

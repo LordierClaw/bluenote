@@ -9,8 +9,8 @@ Usage: bluenote <command> [options]
 Commands:
   tui [...args]             Launch the terminal interface via bluenote-term
   web [...args]             Launch the local WebUI via bluenote-webui
-  daemon start|status|stop  Reserved local daemon scaffold
-  doctor                    Check runtime and package availability
+  daemon start|status|stop  Manage the local BlueNote daemon
+  doctor                    Check runtime, daemon, and optional clients
   version                   Print package versions
 
 Options:

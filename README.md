@@ -39,7 +39,7 @@ bluenote daemon stop
 Current command surface:
 
 - `bluenote --help` prints top-level help without importing terminal or web clients.
-- `bluenote version` prints the distribution package version and best-effort sibling package versions from package metadata only.
+- `bluenote version` prints the distribution package version and required runtime package versions from package metadata only. Optional client availability is reported by `bluenote doctor`.
 - `bluenote doctor` checks platform, Node compatibility, daemon state, optional client executables, and Bun availability for the TUI. It reports token presence without printing token values.
 - `bluenote daemon <start|status|stop>` manages a minimal local-only daemon with HTTP `/health` and `/capabilities` endpoints.
 - `bluenote web` launches the `bluenote-webui` executable found on `PATH` only when daemon metadata exists, passing daemon connection details through environment variables without printing tokens.
@@ -61,12 +61,12 @@ Local file dependencies are used for multi-repo development only, not as the end
 ```json
 {
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core",
-    "bluenote-term": "file:../bluenote-term/packages/term",
-    "bluenote-webui": "file:../bluenote-webui"
+    "@lordierclaw/bluenote-core": "file:../bluenote-core"
   }
 }
 ```
+
+Optional clients are installed separately in end-user and manual-verification flows; they are not required dependencies of `@lordierclaw/bluenote`.
 
 For release-like dependency modes, prefer published npm versions or pinned immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
 

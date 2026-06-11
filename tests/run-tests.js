@@ -76,8 +76,8 @@ async function testPackageMetadata() {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
   assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], 'file:../bluenote-core');
-  assert.equal(packageJson.dependencies['bluenote-term'], 'file:../bluenote-term/packages/term');
-  assert.equal(packageJson.dependencies['bluenote-webui'], 'file:../bluenote-webui');
+  assert.equal(packageJson.dependencies['bluenote-term'], undefined);
+  assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
 }
 
 async function testHelpDoesNotLoadClients() {
@@ -101,8 +101,8 @@ async function testVersionDoesNotLoadClients() {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /@lordierclaw\/bluenote 0\.0\.0/);
   assert.match(result.stdout, /@lordierclaw\/bluenote-core/);
-  assert.match(result.stdout, /bluenote-term/);
-  assert.match(result.stdout, /bluenote-webui/);
+  assert.doesNotMatch(result.stdout, /bluenote-term/);
+  assert.doesNotMatch(result.stdout, /bluenote-webui/);
   assert.equal(result.stderr, '');
 }
 
