@@ -13,7 +13,9 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 
 ## Local dependency strategy
 
-During local multi-repo development, use local file dependencies where practical:
+The distribution package currently has no eager runtime dependencies on sibling repos. `bluenote tui` and `bluenote web` lazy-load the public client packages only when those commands run.
+
+During local multi-repo development, use local file dependencies where practical when testing client command integration:
 
 ```json
 {
@@ -34,9 +36,29 @@ For cross-repo changes, verify from the dependency leaf outward:
 1. `bluenote-core`: `npm run check`
 2. `bluenote-term`: `bun run check`
 3. `bluenote-webui`: `npm run check`
-4. `bluenote`: distribution checks when package scripts exist
+4. `bluenote`: `npm test` or `npm run check`
 
-For docs-only changes, use `git status` plus basic file inspection unless package files or code changed.
+For docs-only changes, use `git status` plus basic file inspection unless package files or code changed. When documentation describes the CLI contract, also run the relevant help/smoke commands when practical.
+
+## Distribution package scripts
+
+From this repo:
+
+```sh
+npm test
+npm run check
+```
+
+`npm run check` currently delegates to `npm test`.
+
+## Implemented command surface
+
+- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`.
+- `bluenote version`: prints the distribution package version.
+- `bluenote doctor`: reports Node version, package baseline, and support status; it does not perform workspace checks.
+- `bluenote tui`: lazy-loads `bluenote-term` through its public command API.
+- `bluenote web`: lazy-loads `bluenote-webui` through its public command API.
+- `bluenote daemon --help`: scaffold help only. `bluenote daemon` exits nonzero until daemon/runtime/sync protocol work is designed and implemented.
 
 ## Choosing the correct repo for a feature
 
@@ -53,7 +75,7 @@ For docs-only changes, use `git status` plus basic file inspection unless packag
 | `bluenote-core` | Node `>=16.14 <17 || >=18`, npm |
 | `bluenote-term` | Bun/OpenTUI allowed; newer Node allowed when required |
 | `bluenote-webui` | Node `>=16.14 <17 || >=18`, npm |
-| `bluenote` | Node 16.14-compatible; lazy-load heavy clients |
+| `bluenote` | Node `>=16.14` package engine; lazy-load heavy clients |
 
 ## Never import internal paths
 
