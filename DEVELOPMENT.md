@@ -55,10 +55,10 @@ npm run check
 
 - `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
 - `bluenote version`: distribution version plus best-effort sibling package metadata; no heavy client imports.
-- `bluenote doctor`: platform, Node compatibility, package resolution, and Bun availability; no secrets or workspace mutation.
-- `bluenote tui [...args]`: resolves the public `bluenote-term` package bin and spawns it through Bun as `bun <bin> tui [...args]`. If Bun or the public package is unavailable, it prints an actionable runtime error.
-- `bluenote web [...args]`: lazy dynamic import of the public `bluenote-webui` command API.
-- `bluenote daemon start|status|stop`: scaffold-only future local daemon command; no sync/runtime daemon is implemented.
+- `bluenote doctor`: platform, Node compatibility, daemon status, optional `bluenote-webui`/`bluenote-term` PATH discovery, and Bun availability; no secrets or workspace mutation.
+- `bluenote daemon start|status|stop`: minimal local-only HTTP daemon lifecycle with `/health` and `/capabilities`; tokens are stored in daemon metadata but never printed.
+- `bluenote web [...args]`: requires daemon metadata, discovers the public `bluenote-webui` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
+- `bluenote tui [...args]`: requires daemon metadata, discovers the public `bluenote-term` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
 - `bn`: alias for the same distribution binary.
 
 ## Choosing the correct repo for a feature
@@ -66,8 +66,8 @@ npm run check
 - Note model, storage, search, AI, and core API semantics -> `bluenote-core`.
 - Terminal layout, keybindings, OpenTUI behavior, terminal command API -> `bluenote-term`.
 - Browser UI, local web server/proxy, setup flow -> `bluenote-webui`.
-- Top-level command routing, help, version, doctor, daemon scaffold, binary packaging -> `bluenote`.
-- Real daemon/runtime/sync protocol -> design cross-repo first; protocol/core first; clients later.
+- Top-level command routing, help, version, doctor, minimal local daemon lifecycle, PATH client discovery/launch, binary packaging -> `bluenote`.
+- Expanded daemon/runtime/sync protocol beyond local health/capabilities -> design cross-repo first; protocol/core first; clients later.
 
 ## Runtime compatibility matrix
 

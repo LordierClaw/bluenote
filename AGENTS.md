@@ -10,7 +10,8 @@
 - `bluenote --help` and command help
 - `bluenote version`
 - `bluenote doctor`
-- `bluenote daemon` scaffold and distribution-facing daemon command surface
+- minimal local `bluenote daemon` lifecycle and distribution-facing daemon command surface
+- optional client PATH discovery and daemon-context launch
 - binary packaging and distribution docs
 
 ## Does not own
@@ -18,7 +19,7 @@
 - core note model, storage layout, search semantics, or AI semantics
 - terminal/TUI/OpenTUI implementation
 - browser UI implementation or web layout
-- real daemon/runtime/sync protocol without cross-repo design first
+- expanded daemon/runtime/sync protocol beyond local health/capabilities without cross-repo design first
 
 ## Runtime compatibility
 
@@ -58,7 +59,7 @@ Older sibling phase docs are historical unless the active task references them.
 - Add core behavior: edit `bluenote-core`.
 - Add terminal behavior: edit `bluenote-term`.
 - Add browser UI behavior: edit `bluenote-webui`.
-- Add real daemon/runtime/sync behavior: stop and design cross-repo first.
+- Add expanded daemon/runtime/sync behavior beyond local health/capabilities: stop and design cross-repo first.
 
 ## Checks
 
