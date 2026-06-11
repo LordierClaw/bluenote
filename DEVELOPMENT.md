@@ -13,9 +13,7 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 
 ## Local dependency strategy
 
-The distribution package currently has no eager runtime dependencies on sibling repos. `bluenote tui` and `bluenote web` lazy-load the public client packages only when those commands run.
-
-During local multi-repo development, use local file dependencies where practical when testing client command integration:
+`@lordierclaw/bluenote` composes the sibling packages through public package APIs/bins only:
 
 ```json
 {
@@ -27,7 +25,7 @@ During local multi-repo development, use local file dependencies where practical
 }
 ```
 
-When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches.
+When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches. Do not use branch dependencies such as `#main` for release-like dependency modes.
 
 ## Build/check order
 
@@ -36,29 +34,32 @@ For cross-repo changes, verify from the dependency leaf outward:
 1. `bluenote-core`: `npm run check`
 2. `bluenote-term`: `bun run check`
 3. `bluenote-webui`: `npm run check`
-4. `bluenote`: `npm test` or `npm run check`
+4. `bluenote`: `npm run check`
 
 For docs-only changes, use `git status` plus basic file inspection unless package files or code changed. When documentation describes the CLI contract, also run the relevant help/smoke commands when practical.
 
 ## Distribution package scripts
 
-From this repo:
-
 ```sh
-npm test
+npm install
+npm run clean
+npm run typecheck
+npm run test
+npm run build
 npm run check
 ```
 
-`npm run check` currently delegates to `npm test`.
+`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run check` runs typecheck, tests, and a final build.
 
 ## Implemented command surface
 
-- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`.
-- `bluenote version`: prints the distribution package version.
-- `bluenote doctor`: reports Node version, package baseline, and support status; it does not perform workspace checks.
-- `bluenote tui`: lazy-loads `bluenote-term` through its public command API.
-- `bluenote web`: lazy-loads `bluenote-webui` through its public command API.
-- `bluenote daemon --help`: scaffold help only. `bluenote daemon` exits nonzero until daemon/runtime/sync protocol work is designed and implemented.
+- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
+- `bluenote version`: distribution version plus best-effort sibling package metadata; no heavy client imports.
+- `bluenote doctor`: platform, Node compatibility, package resolution, and Bun availability; no secrets or workspace mutation.
+- `bluenote tui [...args]`: resolves the public `bluenote-term` package bin and spawns it through Bun as `bun <bin> tui [...args]`. If Bun or the public package is unavailable, it prints an actionable runtime error.
+- `bluenote web [...args]`: lazy dynamic import of the public `bluenote-webui` command API.
+- `bluenote daemon start|status|stop`: scaffold-only future local daemon command; no sync/runtime daemon is implemented.
+- `bn`: alias for the same distribution binary.
 
 ## Choosing the correct repo for a feature
 
@@ -75,16 +76,17 @@ npm run check
 | `bluenote-core` | Node `>=16.14 <17 || >=18`, npm |
 | `bluenote-term` | Bun/OpenTUI allowed; newer Node allowed when required |
 | `bluenote-webui` | Node `>=16.14 <17 || >=18`, npm |
-| `bluenote` | Node `>=16.14` package engine; lazy-load heavy clients |
+| `bluenote` | Node `>=16.14 <17 || >=18`; lazy-load/spawn heavy clients only for their commands |
 
 ## Never import internal paths
 
-Across repos, import only public package exports. Forbidden examples:
+Across repos, import only public package exports or use public package bins. Forbidden examples:
 
 ```ts
 import "@lordierclaw/bluenote-core/src/..."
 import "../bluenote-core/src/..."
 import "../bluenote-term/packages/term/src/..."
+import "../bluenote-webui/src/..."
 ```
 
 If a client or distribution command needs new behavior, add a public API in the owning repo first, with tests and docs there.

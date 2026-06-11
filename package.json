@@ -1,16 +1,29 @@
 {
-  "name": "bluenote",
+  "name": "@lordierclaw/bluenote",
   "version": "0.0.0",
   "description": "Official BlueNote distribution CLI.",
   "license": "MIT",
   "bin": {
-    "bluenote": "./bin/bluenote.js"
+    "bluenote": "./dist/bin.js",
+    "bn": "./dist/bin.js"
   },
   "engines": {
-    "node": ">=16.14"
+    "node": ">=16.14 <17 || >=18"
   },
   "scripts": {
-    "test": "node tests/cli-help.test.js && node tests/version.test.js && node tests/doctor.test.js && node tests/client-wrappers.test.js && node tests/daemon.test.js",
-    "check": "npm test"
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node tests/run-tests.js",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@lordierclaw/bluenote-core": "file:../bluenote-core",
+    "bluenote-term": "file:../bluenote-term/packages/term",
+    "bluenote-webui": "file:../bluenote-webui"
+  },
+  "devDependencies": {
+    "@types/node": "16.18.126",
+    "typescript": "5.8.3"
   }
 }

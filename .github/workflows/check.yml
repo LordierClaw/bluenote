@@ -1,0 +1,55 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  node-16:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bluenote
+      - uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-core
+          path: bluenote-core
+      - uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-term
+          path: bluenote-term
+      - uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-webui
+          path: bluenote-webui
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16.14.0
+          cache: npm
+          cache-dependency-path: bluenote/package-lock.json
+      - name: Install dependencies
+        working-directory: bluenote
+        run: npm install --include=dev
+      - name: Typecheck
+        working-directory: bluenote
+        run: npm run typecheck
+      - name: Test
+        working-directory: bluenote
+        run: npm run test
+      - name: Build
+        working-directory: bluenote
+        run: npm run build
+      - name: Check
+        working-directory: bluenote
+        run: npm run check
+      - name: Smoke help
+        working-directory: bluenote
+        run: node dist/bin.js --help
+      - name: Smoke version
+        working-directory: bluenote
+        run: node dist/bin.js version
+      - name: Smoke doctor
+        working-directory: bluenote
+        run: node dist/bin.js doctor
