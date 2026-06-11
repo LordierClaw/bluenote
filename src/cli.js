@@ -15,6 +15,8 @@ Options:
   -h, --help  Show this help message
 `;
 
+const COMMANDS = ['tui', 'web', 'daemon', 'doctor', 'version'];
+
 function write(stream, text) {
   if (stream && typeof stream.write === 'function') {
     stream.write(text);
@@ -31,6 +33,11 @@ async function run(args, io) {
     return 0;
   }
 
+  if (COMMANDS.indexOf(argv[0]) !== -1) {
+    write(streams.stderr || process.stderr, `Command not implemented yet: ${argv[0]}\n`);
+    return 1;
+  }
+
   write(streams.stderr || process.stderr, `Unknown command: ${argv[0]}\nRun \"bluenote --help\" for usage.\n`);
   return 1;
 }
@@ -42,6 +49,7 @@ async function main(args, io) {
 }
 
 module.exports = {
+  COMMANDS,
   HELP_TEXT,
   main,
   run,
