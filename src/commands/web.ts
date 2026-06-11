@@ -1,28 +1,53 @@
+import { spawn as defaultSpawn } from "child_process"
+
 import type { CommandIo } from "../types"
-import { importPublicPackage } from "../utils/lazy-import"
+import { findCommandOnPath } from "../utils/command-discovery"
+import { getDaemonConnection } from "../utils/daemon-state"
 import { write } from "../utils/write"
 
-type WebApi = {
-  runWebCommand?: (args: string[], options?: Record<string, unknown>) => Promise<void | number> | void | number
-  runCommand?: (args: string[], options?: Record<string, unknown>) => Promise<void | number> | void | number
+function daemonNotRunning(io: CommandIo): number {
+  write(io.stderr || process.stderr, "BlueNote daemon is not running.\nRun: bluenote daemon start\n")
+  return 1
+}
+
+function missingClient(io: CommandIo, command: string): number {
+  write(io.stderr || process.stderr, `Optional client ${command} was not found on PATH. Install it with npm install -g ${command} and retry.\n`)
+  return 1
 }
 
 export async function runWeb(args: string[] = [], io: CommandIo = {}): Promise<number> {
-  let moduleNamespace: WebApi
-  try {
-    moduleNamespace = await importPublicPackage("bluenote-webui", io.clientLoader) as WebApi
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    write(io.stderr || process.stderr, `Unable to load bluenote-webui for \`bluenote web\`: ${message}\nInstall/build the public bluenote-webui package and retry.\n`)
-    return 1
-  }
+  const env = io.env || process.env
+  const daemon = getDaemonConnection(env)
+  if (!daemon) return daemonNotRunning(io)
 
-  const command = moduleNamespace.runWebCommand || moduleNamespace.runCommand
-  if (typeof command !== "function") {
-    write(io.stderr || process.stderr, "bluenote-webui does not export runWebCommand or runCommand.\n")
-    return 1
-  }
+  const resolution = findCommandOnPath("bluenote-webui", { path: env.PATH, platform: io.platform || process.platform, pathext: env.PATHEXT })
+  if (!resolution) return missingClient(io, "bluenote-webui")
 
-  const result = await command(args, { stdout: io.stdout || process.stdout, stderr: io.stderr || process.stderr, env: io.env || process.env })
-  return typeof result === "number" ? result : 0
+  const spawn = io.spawn || defaultSpawn
+  return await new Promise<number>((resolve) => {
+    let child
+    try {
+      child = spawn(resolution.path, args, {
+        stdio: ["inherit", "inherit", "inherit"],
+        env: {
+          ...env,
+          BLUENOTE_DAEMON_URL: daemon.url,
+          BLUENOTE_DAEMON_TOKEN: daemon.token,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      write(io.stderr || process.stderr, `Unable to launch bluenote-webui: ${message}\n`)
+      resolve(1)
+      return
+    }
+
+    child.on("error", (error) => {
+      write(io.stderr || process.stderr, `Unable to launch bluenote-webui: ${error.message}\n`)
+      resolve(1)
+    })
+    child.on("exit", (code) => {
+      resolve(code === null ? 1 : code)
+    })
+  })
 }

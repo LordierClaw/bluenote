@@ -1,43 +1,50 @@
 import { spawn as defaultSpawn } from "child_process"
-import path from "path"
 
 import type { CommandIo } from "../types"
-import { findPackageBin } from "../utils/package-info"
+import { findCommandOnPath } from "../utils/command-discovery"
+import { getDaemonConnection } from "../utils/daemon-state"
 import { write } from "../utils/write"
 
-function writeRuntimeError(io: CommandIo, detail?: string): number {
-  const stderr = io.stderr || process.stderr
-  write(stderr, "Unable to run `bluenote tui` in the current runtime.\n")
-  if (detail) write(stderr, `${detail}\n`)
-  write(stderr, "The terminal UI is provided by bluenote-term and requires Bun/OpenTUI. Install Bun and ensure the public bluenote-term package is installed, then retry.\n")
+function daemonNotRunning(io: CommandIo): number {
+  write(io.stderr || process.stderr, "BlueNote daemon is not running.\nRun: bluenote daemon start\n")
+  return 1
+}
+
+function missingClient(io: CommandIo, command: string): number {
+  write(io.stderr || process.stderr, `Optional client ${command} was not found on PATH. Install it with npm install -g ${command} and retry.\n`)
   return 1
 }
 
 export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<number> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    return writeRuntimeError(io, "The TUI requires an interactive terminal (TTY).")
-  }
+  const env = io.env || process.env
+  const daemon = getDaemonConnection(env)
+  if (!daemon) return daemonNotRunning(io)
 
-  const binPath = findPackageBin("bluenote-term", "bn")
-  if (!binPath) return writeRuntimeError(io, "Could not resolve the public bluenote-term bin.")
+  const resolution = findCommandOnPath("bluenote-term", { path: env.PATH, platform: io.platform || process.platform, pathext: env.PATHEXT })
+  if (!resolution) return missingClient(io, "bluenote-term")
 
   const spawn = io.spawn || defaultSpawn
   return await new Promise<number>((resolve) => {
     let child
     try {
-      child = spawn("bun", [binPath, "tui", ...args], {
+      child = spawn(resolution.path, args, {
         stdio: ["inherit", "inherit", "inherit"],
-        cwd: path.dirname(binPath),
-        env: io.env || process.env,
+        env: {
+          ...env,
+          BLUENOTE_DAEMON_URL: daemon.url,
+          BLUENOTE_DAEMON_TOKEN: daemon.token,
+        },
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      resolve(writeRuntimeError(io, message))
+      write(io.stderr || process.stderr, `Unable to launch bluenote-term: ${message}\n`)
+      resolve(1)
       return
     }
 
     child.on("error", (error) => {
-      resolve(writeRuntimeError(io, error.message))
+      write(io.stderr || process.stderr, `Unable to launch bluenote-term: ${error.message}\n`)
+      resolve(1)
     })
     child.on("exit", (code) => {
       resolve(code === null ? 1 : code)
