@@ -55,7 +55,10 @@ async function testTuiLoadsPublicPackageAndPassesArgs() {
   assert.equal(result, 7);
   assert.deepEqual(calls, ['bluenote-term']);
   assert.deepEqual(received.map((entry) => entry.args), [['--flag']]);
-  assert.equal(received[0].io, harness.io);
+  assert.equal(received[0].io.marker, 'tui-io');
+  assert.equal(received[0].io.stdout, harness.io.stdout);
+  assert.equal(received[0].io.stderr, harness.io.stderr);
+  assert.equal(received[0].io.clientLoader, undefined);
 }
 
 async function testWebLoadsPublicPackageAndPassesArgs() {
@@ -79,7 +82,10 @@ async function testWebLoadsPublicPackageAndPassesArgs() {
   assert.equal(result, 0);
   assert.deepEqual(calls, ['bluenote-webui']);
   assert.deepEqual(received.map((entry) => entry.args), [['--port', '4174']]);
-  assert.equal(received[0].io, harness.io);
+  assert.equal(received[0].io.marker, 'web-io');
+  assert.equal(received[0].io.stdout, harness.io.stdout);
+  assert.equal(received[0].io.stderr, harness.io.stderr);
+  assert.equal(received[0].io.clientLoader, undefined);
 }
 
 async function testRunCommandFallbackIsAccepted() {
@@ -94,35 +100,44 @@ async function testRunCommandFallbackIsAccepted() {
   assert.equal(await cli.run(['web'], webHarness.io), 4);
 }
 
-async function testMissingClientModulePrintsActionableError() {
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function testMissingClientModulePrintsActionableError(commandName, packageName, internalPath) {
   const harness = createIo({
     clientLoader: async (specifier) => {
-      const error = new Error(`Cannot find package '${specifier}'`);
+      const error = new Error(`Cannot find package '${specifier}' imported from ${internalPath}`);
       error.code = 'ERR_MODULE_NOT_FOUND';
       throw error;
     },
   });
 
-  const result = await cli.run(['tui'], harness.io);
+  const result = await cli.run([commandName], harness.io);
+  const stderr = harness.stderr.join('');
 
   assert.equal(result, 1);
   assert.equal(harness.stdout.join(''), '');
-  assert.match(harness.stderr.join(''), /Unable to load bluenote-term for `bluenote tui`\./);
-  assert.match(harness.stderr.join(''), /Install the public bluenote-term package/);
-  assert.match(harness.stderr.join(''), /public command API/);
+  assert.match(stderr, new RegExp('Unable to load ' + packageName + ' for `bluenote ' + commandName + '`\\.'));
+  assert.match(stderr, new RegExp(`Install the public ${packageName} package`));
+  assert.match(stderr, /public command API/);
+  assert.doesNotMatch(stderr, /Cause:/);
+  assert.doesNotMatch(stderr, new RegExp(escapeRegExp(internalPath)));
+  assert.doesNotMatch(stderr, /\/root\/code/);
 }
 
-async function testMissingPublicApiPrintsActionableError() {
+async function testMissingPublicApiPrintsActionableError(commandName, packageName, expectedApis) {
   const harness = createIo({
     clientLoader: async () => ({ notACommand: async () => 0 }),
   });
 
-  const result = await cli.run(['web'], harness.io);
+  const result = await cli.run([commandName], harness.io);
+  const stderr = harness.stderr.join('');
 
   assert.equal(result, 1);
   assert.equal(harness.stdout.join(''), '');
-  assert.match(harness.stderr.join(''), /bluenote-webui does not export a supported command API for `bluenote web`\./);
-  assert.match(harness.stderr.join(''), /Expected one of: runWebCommand, runCommand/);
+  assert.match(stderr, new RegExp(packageName + ' does not export a supported command API for `bluenote ' + commandName + '`\\.'));
+  assert.match(stderr, new RegExp(`Expected one of: ${expectedApis.join(', ')}`));
 }
 
 async function testClientLoadersUseOnlyPublicPackageSpecifiers() {
@@ -148,8 +163,10 @@ async function runTests() {
   await testTuiLoadsPublicPackageAndPassesArgs();
   await testWebLoadsPublicPackageAndPassesArgs();
   await testRunCommandFallbackIsAccepted();
-  await testMissingClientModulePrintsActionableError();
-  await testMissingPublicApiPrintsActionableError();
+  await testMissingClientModulePrintsActionableError('tui', 'bluenote-term', '/root/code/bluenote/src/commands/tui.js');
+  await testMissingClientModulePrintsActionableError('web', 'bluenote-webui', '/root/code/bluenote/src/commands/web.js');
+  await testMissingPublicApiPrintsActionableError('tui', 'bluenote-term', ['runTuiCommand', 'runCommand']);
+  await testMissingPublicApiPrintsActionableError('web', 'bluenote-webui', ['runWebCommand', 'runCommand']);
   await testClientLoadersUseOnlyPublicPackageSpecifiers();
 }
 
