@@ -1,6 +1,7 @@
 'use strict';
 
 const versionCommand = require('./commands/version.js');
+const doctorCommand = require('./commands/doctor.js');
 
 const HELP_TEXT = `BlueNote distribution CLI
 
@@ -37,6 +38,10 @@ async function run(args, io) {
 
   if (argv[0] === 'version') {
     return versionCommand.run(argv.slice(1), streams);
+  }
+
+  if (argv[0] === 'doctor') {
+    return doctorCommand.run(argv.slice(1), streams);
   }
 
   if (COMMANDS.indexOf(argv[0]) !== -1) {
