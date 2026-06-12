@@ -118,6 +118,7 @@ export function createDaemonRouter(token: string): DaemonRouter {
     Promise.resolve()
       .then(async () => {
         if (!route) {
+          requireBearerAuth(request, token)
           throw new HttpError(404, "not_found", "Route not found")
         }
         if (route.auth) {

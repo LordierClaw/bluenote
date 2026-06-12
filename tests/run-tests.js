@@ -497,6 +497,10 @@ async function testDaemonApiRouterErrors() {
     assert.equal(unauthorized.status, 401);
     assert.deepEqual(JSON.parse(unauthorized.body), { error: { code: 'unauthorized', message: 'Missing or invalid daemon token' } });
 
+    const missingUnauthenticated = await httpGet(`${metadata.url}/api/not-yet-implemented`);
+    assert.equal(missingUnauthenticated.status, 401);
+    assert.deepEqual(JSON.parse(missingUnauthenticated.body), { error: { code: 'unauthorized', message: 'Missing or invalid daemon token' } });
+
     const missing = await httpGet(`${metadata.url}/api/not-yet-implemented`, { authorization: `Bearer ${metadata.token}` });
     assert.equal(missing.status, 404);
     assert.deepEqual(JSON.parse(missing.body), { error: { code: 'not_found', message: 'Route not found' } });
