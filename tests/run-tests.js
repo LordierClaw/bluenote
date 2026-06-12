@@ -84,6 +84,20 @@ function httpGet(url, headers = {}) {
   });
 }
 
+function httpPost(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, { method: 'POST', headers }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.on('error', reject);
+    request.setTimeout(5000, () => request.destroy(new Error('request timed out')));
+    request.end();
+  });
+}
+
 async function httpGetJson(url, headers = {}) {
   const response = await httpGet(url, headers);
   return { status: response.status, json: JSON.parse(response.body) };
@@ -449,12 +463,33 @@ async function testDaemonHealthAndCapabilities() {
     assert.deepEqual(health.json, { ok: true, name: 'bluenote-daemon', version: packageJson.version });
     const unauthenticated = await httpGet(`${metadata.url}/capabilities`);
     assert.equal(unauthenticated.status, 401);
+    assert.deepEqual(JSON.parse(unauthenticated.body), { error: { code: 'unauthorized', message: 'Missing or invalid daemon token' } });
     const capabilities = await httpGetJson(`${metadata.url}/capabilities`, { authorization: `Bearer ${metadata.token}` });
     assert.equal(capabilities.json.name, 'bluenote-daemon');
     assert.equal(capabilities.json.mode, 'local-only');
     assert.equal(capabilities.json.version, packageJson.version);
     assert.ok(capabilities.json.clients.web);
     assert.ok(capabilities.json.clients.tui);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testDaemonApiRouterErrors() {
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const metadata = JSON.parse(fs.readFileSync(path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'daemon.json'), 'utf8'));
+
+    const unauthorized = await httpPost(`${metadata.url}/shutdown`);
+    assert.equal(unauthorized.status, 401);
+    assert.deepEqual(JSON.parse(unauthorized.body), { error: { code: 'unauthorized', message: 'Missing or invalid daemon token' } });
+
+    const missing = await httpGet(`${metadata.url}/api/not-yet-implemented`, { authorization: `Bearer ${metadata.token}` });
+    assert.equal(missing.status, 404);
+    assert.deepEqual(JSON.parse(missing.body), { error: { code: 'not_found', message: 'Route not found' } });
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
@@ -495,6 +530,7 @@ const tests = [
   testWindowsClientLaunchUsesShellForCmdShims,
   testMissingClientMessage,
   testDaemonHealthAndCapabilities,
+  testDaemonApiRouterErrors,
   testWebAndTuiDoNotLoadClients,
   testBuildOutputExists,
 ];

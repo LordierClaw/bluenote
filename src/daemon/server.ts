@@ -3,6 +3,7 @@ import http from "http"
 import type { AddressInfo } from "net"
 
 import { ensureParentDir } from "./paths"
+import { createDaemonRouter, writeJson } from "./router"
 
 export type DaemonMetadata = {
   pid: number
@@ -18,64 +19,36 @@ export type DaemonServerOptions = {
   version: string
 }
 
-function sendJson(response: http.ServerResponse, statusCode: number, body: unknown): void {
-  const text = JSON.stringify(body)
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(text),
-  })
-  response.end(text)
-}
-
-function isAuthorized(request: http.IncomingMessage, token: string): boolean {
-  const authorization = request.headers.authorization || ""
-  return authorization === `Bearer ${token}`
-}
-
 export async function startDaemonServer(options: DaemonServerOptions): Promise<void> {
-  const server = http.createServer((request, response) => {
-    const url = new URL(request.url || "/", "http://127.0.0.1")
+  const router = createDaemonRouter(options.token)
+  const server = http.createServer((request, response) => router.handle(request, response))
 
-    if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, name: "bluenote-daemon", version: options.version })
-      return
-    }
+  router.get("/health", ({ response }) => {
+    writeJson(response, 200, { ok: true, name: "bluenote-daemon", version: options.version })
+  }, { auth: false })
 
-    if (request.method === "GET" && url.pathname === "/capabilities") {
-      if (!isAuthorized(request, options.token)) {
-        sendJson(response, 401, { ok: false, error: "unauthorized" })
-        return
+  router.get("/capabilities", ({ response }) => {
+    writeJson(response, 200, {
+      ok: true,
+      name: "bluenote-daemon",
+      version: options.version,
+      mode: "local-only",
+      clients: {
+        web: { daemonEnvironment: true },
+        tui: { daemonEnvironment: true },
+      },
+    })
+  })
+
+  router.post("/shutdown", ({ response }) => {
+    writeJson(response, 200, { ok: true })
+    server.close(() => {
+      try {
+        fs.rmSync(options.statePath, { force: true })
+      } finally {
+        process.exit(0)
       }
-      sendJson(response, 200, {
-        ok: true,
-        name: "bluenote-daemon",
-        version: options.version,
-        mode: "local-only",
-        clients: {
-          web: { daemonEnvironment: true },
-          tui: { daemonEnvironment: true },
-        },
-      })
-      return
-    }
-
-    if (request.method === "POST" && url.pathname === "/shutdown") {
-      if (!isAuthorized(request, options.token)) {
-        sendJson(response, 401, { ok: false, error: "unauthorized" })
-        return
-      }
-      sendJson(response, 200, { ok: true })
-      server.close(() => {
-        try {
-          fs.rmSync(options.statePath, { force: true })
-        } finally {
-          process.exit(0)
-        }
-      })
-      return
-    }
-
-    sendJson(response, 404, { ok: false, error: "not found" })
+    })
   })
 
   await new Promise<void>((resolve, reject) => {
