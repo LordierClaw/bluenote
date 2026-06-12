@@ -2,7 +2,7 @@ import { spawn as defaultSpawn } from "child_process"
 
 import type { CommandIo } from "../types"
 import { findCommandOnPath } from "../utils/command-discovery"
-import { getDaemonConnection } from "../utils/daemon-state"
+import { readDaemonStatus } from "../utils/daemon-state"
 import { write } from "../utils/write"
 
 function daemonNotRunning(io: CommandIo): number {
@@ -17,8 +17,9 @@ function missingClient(io: CommandIo, command: string): number {
 
 export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<number> {
   const env = io.env || process.env
-  const daemon = getDaemonConnection(env)
-  if (!daemon) return daemonNotRunning(io)
+  const daemon = await readDaemonStatus(env)
+  if (daemon.state !== "running" || !daemon.metadata) return daemonNotRunning(io)
+  const metadata = daemon.metadata
 
   const resolution = findCommandOnPath("bluenote-term", { path: env.PATH, platform: io.platform || process.platform, pathext: env.PATHEXT })
   if (!resolution) return missingClient(io, "bluenote-term")
@@ -29,10 +30,11 @@ export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<n
     try {
       child = spawn(resolution.path, args, {
         stdio: ["inherit", "inherit", "inherit"],
+        shell: (io.platform || process.platform) === "win32" && /\.(cmd|bat)$/i.test(resolution.path),
         env: {
           ...env,
-          BLUENOTE_DAEMON_URL: daemon.url,
-          BLUENOTE_DAEMON_TOKEN: daemon.token,
+          BLUENOTE_DAEMON_URL: metadata.url,
+          BLUENOTE_DAEMON_TOKEN: metadata.token,
         },
       })
     } catch (error) {

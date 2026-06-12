@@ -2,6 +2,7 @@ import { spawnSync as defaultSpawnSync } from "child_process"
 import os from "os"
 
 import type { CommandIo } from "../types"
+import { getBluenoteStateDir, getDaemonStatePath } from "../daemon/paths"
 import { findCommandOnPath } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
 import { readOwnPackageInfo } from "../utils/package-info"
@@ -52,6 +53,11 @@ export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promi
 
   const bun = checkBun(io)
   write(stdout, `  Bun for TUI: ${bun.available ? `available${bun.version ? ` (${bun.version})` : ""}` : "not found; install Bun to run bluenote tui"}\n`)
+
+  write(stdout, "\nConfig\n")
+  write(stdout, `  config dir: ${getBluenoteStateDir(env)}\n`)
+  write(stdout, `  daemon state: ${getDaemonStatePath(env)}\n`)
+  write(stdout, `  daemon endpoint: ${daemon.metadata ? daemon.metadata.url : "unavailable"}\n`)
 
   write(stdout, "\nAI\n")
   write(stdout, "  provider: not configured\n")

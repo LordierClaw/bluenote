@@ -42,6 +42,10 @@ export async function startDaemonServer(options: DaemonServerOptions): Promise<v
     }
 
     if (request.method === "GET" && url.pathname === "/capabilities") {
+      if (!isAuthorized(request, options.token)) {
+        sendJson(response, 401, { ok: false, error: "unauthorized" })
+        return
+      }
       sendJson(response, 200, {
         ok: true,
         name: "bluenote-daemon",
@@ -88,7 +92,9 @@ export async function startDaemonServer(options: DaemonServerOptions): Promise<v
     version: options.version,
   }
   ensureParentDir(options.statePath)
+  fs.rmSync(options.statePath, { force: true })
   fs.writeFileSync(options.statePath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 })
+  fs.chmodSync(options.statePath, 0o600)
 
   const cleanup = () => {
     try {

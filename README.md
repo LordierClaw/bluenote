@@ -61,7 +61,7 @@ Local file dependencies are used for multi-repo development only, not as the end
 ```json
 {
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core"
+    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#<pinned-commit-sha>"
   }
 }
 ```

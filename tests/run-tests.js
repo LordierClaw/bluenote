@@ -75,7 +75,7 @@ async function testPackageMetadata() {
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
-  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], 'file:../bluenote-core');
+  assert.match(packageJson.dependencies['@lordierclaw/bluenote-core'], /^git\+https:\/\/github\.com\/LordierClaw\/bluenote-core\.git#[0-9a-f]{40}$/);
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
 }
@@ -124,6 +124,7 @@ async function testDoctorDoesNotLoadClients() {
   assert.match(result.stdout, /Node status: ok/);
   assert.match(result.stdout, /Distribution/);
   assert.match(result.stdout, /Clients/);
+  assert.match(result.stdout, /Config/);
   assert.match(result.stdout, /Bun for TUI: available/);
 }
 
@@ -209,6 +210,7 @@ async function testDaemonLifecycle() {
     assert.ok(metadata.pid);
     assert.ok(metadata.url);
     assert.ok(metadata.token);
+    assert.equal(fs.statSync(metadataPath).mode & 0o777, 0o600);
 
     const running = await runCli(['daemon', 'status'], { env });
     assert.equal(running.code, 0);
@@ -230,6 +232,28 @@ async function testDaemonLifecycle() {
     const finalStatus = await runCli(['daemon', 'status'], { env });
     assert.equal(finalStatus.code, 0);
     assert.match(finalStatus.stdout, /status: stopped/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testDaemonStartDoesNotExposeTokenInArgv() {
+  const { root, env } = makeDaemonEnv();
+  try {
+    const spawned = [];
+    function spawn(command, args, options) {
+      spawned.push({ command, args, options });
+      const child = new EventEmitter();
+      child.pid = 99999999;
+      child.unref = () => {};
+      return child;
+    }
+    const result = await runCli(['daemon', 'start'], { env, spawn });
+    assert.equal(result.code, 1);
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(spawned[0].args.filter((arg) => arg === '--token'), []);
+    assert.ok(spawned[0].options.env.BLUENOTE_DAEMON_SERVE_TOKEN);
+    assert.doesNotMatch(spawned[0].args.join(' '), new RegExp(spawned[0].options.env.BLUENOTE_DAEMON_SERVE_TOKEN));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -271,13 +295,9 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
     const termPath = path.join(tempBin, 'bluenote-term');
     writeExecutable(webPath);
     writeExecutable(termPath);
-    writeDaemonMetadata(env, {
-      pid: process.pid,
-      url: 'http://127.0.0.1:12345',
-      token: 'secret-launch-token',
-      startedAt: new Date().toISOString(),
-      version: '0.0.0',
-    });
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const metadata = JSON.parse(fs.readFileSync(path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'daemon.json'), 'utf8'));
     const calls = [];
     function spawn(command, args, options) {
       calls.push({ command, args, options });
@@ -293,14 +313,69 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
 
     assert.equal(calls[0].command, webPath);
     assert.deepEqual(calls[0].args, ['--smoke']);
-    assert.equal(calls[0].options.env.BLUENOTE_DAEMON_URL, 'http://127.0.0.1:12345');
-    assert.equal(calls[0].options.env.BLUENOTE_DAEMON_TOKEN, 'secret-launch-token');
+    assert.equal(calls[0].options.env.BLUENOTE_DAEMON_URL, metadata.url);
+    assert.equal(calls[0].options.env.BLUENOTE_DAEMON_TOKEN, metadata.token);
     assert.equal(calls[1].command, termPath);
     assert.deepEqual(calls[1].args, ['--smoke']);
-    assert.equal(calls[1].options.env.BLUENOTE_DAEMON_URL, 'http://127.0.0.1:12345');
-    assert.equal(calls[1].options.env.BLUENOTE_DAEMON_TOKEN, 'secret-launch-token');
-    assert.doesNotMatch(web.stdout + web.stderr + tui.stdout + tui.stderr, /secret-launch-token/);
+    assert.equal(calls[1].options.env.BLUENOTE_DAEMON_URL, metadata.url);
+    assert.equal(calls[1].options.env.BLUENOTE_DAEMON_TOKEN, metadata.token);
+    assert.doesNotMatch(web.stdout + web.stderr + tui.stdout + tui.stderr, new RegExp(metadata.token));
   } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning() {
+  const tempBin = makeTempDir('client-stale-launch');
+  const { root, env } = makeDaemonEnv();
+  try {
+    writeExecutable(path.join(tempBin, 'bluenote-webui'));
+    writeDaemonMetadata(env, {
+      pid: 99999999,
+      url: 'http://127.0.0.1:9',
+      token: 'stale-launch-token',
+      startedAt: new Date().toISOString(),
+      version: '0.0.0',
+    });
+    let spawnCalled = false;
+    const result = await runCli(['web'], {
+      env: { ...env, PATH: tempBin },
+      spawn() {
+        spawnCalled = true;
+        throw new Error('should not spawn stale daemon client');
+      },
+    });
+    assert.equal(result.code, 1);
+    assert.equal(spawnCalled, false);
+    assert.match(result.stderr, /BlueNote daemon is not running/);
+    assert.doesNotMatch(result.stderr, /stale-launch-token/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testWindowsClientLaunchUsesShellForCmdShims() {
+  const tempBin = makeTempDir('client-win-launch');
+  const { root, env } = makeDaemonEnv();
+  try {
+    const webPath = path.join(tempBin, 'bluenote-webui.CMD');
+    writeExecutable(webPath);
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    const result = await runCli(['web'], { env: { ...env, PATH: tempBin, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, platform: 'win32', spawn });
+    assert.equal(result.code, 0);
+    assert.equal(calls[0].command, webPath);
+    assert.equal(calls[0].options.shell, true);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -308,18 +383,14 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
 async function testMissingClientMessage() {
   const { root, env } = makeDaemonEnv();
   try {
-    writeDaemonMetadata(env, {
-      pid: process.pid,
-      url: 'http://127.0.0.1:12345',
-      token: 'missing-client-token',
-      startedAt: new Date().toISOString(),
-      version: '0.0.0',
-    });
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
     const result = await runCli(['web'], { env: { ...env, PATH: '' } });
     assert.equal(result.code, 1);
     assert.match(result.stderr, /Optional client bluenote-webui was not found on PATH/);
     assert.doesNotMatch(result.stderr, /missing-client-token/);
   } finally {
+    await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -332,7 +403,9 @@ async function testDaemonHealthAndCapabilities() {
     const metadata = JSON.parse(fs.readFileSync(path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'daemon.json'), 'utf8'));
     const health = await fetch(`${metadata.url}/health`).then((response) => response.json());
     assert.deepEqual(health, { ok: true, name: 'bluenote-daemon', version: packageJson.version });
-    const capabilities = await fetch(`${metadata.url}/capabilities`).then((response) => response.json());
+    const unauthenticated = await fetch(`${metadata.url}/capabilities`);
+    assert.equal(unauthenticated.status, 401);
+    const capabilities = await fetch(`${metadata.url}/capabilities`, { headers: { authorization: `Bearer ${metadata.token}` } }).then((response) => response.json());
     assert.equal(capabilities.name, 'bluenote-daemon');
     assert.equal(capabilities.mode, 'local-only');
     assert.equal(capabilities.version, packageJson.version);
@@ -369,9 +442,12 @@ const tests = [
   testDoctorReportsOptionalClients,
   testUnknownCommand,
   testDaemonLifecycle,
+  testDaemonStartDoesNotExposeTokenInArgv,
   testStaleDaemonMetadata,
   testClientLaunchRequiresDaemon,
   testClientLaunchUsesPathAndDaemonEnv,
+  testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning,
+  testWindowsClientLaunchUsesShellForCmdShims,
   testMissingClientMessage,
   testDaemonHealthAndCapabilities,
   testWebAndTuiDoNotLoadClients,

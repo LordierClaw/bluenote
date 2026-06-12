@@ -23,12 +23,11 @@ function binPath(): string {
   return path.resolve(__dirname, "..", "bin.js")
 }
 
-function parseServeArgs(args: string[]): { statePath?: string; token?: string; version?: string } {
-  const parsed: { statePath?: string; token?: string; version?: string } = {}
+function parseServeArgs(args: string[], env: NodeJS.ProcessEnv = process.env): { statePath?: string; token?: string; version?: string } {
+  const parsed: { statePath?: string; token?: string; version?: string } = { token: env.BLUENOTE_DAEMON_SERVE_TOKEN }
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index]
     if (value === "--state" && args[index + 1]) parsed.statePath = args[++index]
-    else if (value === "--token" && args[index + 1]) parsed.token = args[++index]
     else if (value === "--version" && args[index + 1]) parsed.version = args[++index]
   }
   return parsed
@@ -62,10 +61,10 @@ async function startDaemon(io: CommandIo): Promise<number> {
   const spawn = io.spawn || defaultSpawn
   let child
   try {
-    child = spawn(process.execPath, [binPath(), "daemon", "serve", "--state", statePath, "--token", token, "--version", version], {
+    child = spawn(process.execPath, [binPath(), "daemon", "serve", "--state", statePath, "--version", version], {
       detached: true,
       stdio: "ignore",
-      env,
+      env: { ...env, BLUENOTE_DAEMON_SERVE_TOKEN: token },
     })
     child.unref()
   } catch (error) {
@@ -76,6 +75,13 @@ async function startDaemon(io: CommandIo): Promise<number> {
 
   const status = await waitForRunning(env, 5000)
   if (status.state !== "running" || !status.metadata) {
+    if (child?.pid) {
+      try {
+        process.kill(child.pid, "SIGTERM")
+      } catch {
+        // best effort cleanup for failed starts
+      }
+    }
     write(stderr, "Unable to start BlueNote daemon: health check did not become ready.\n")
     return 1
   }
@@ -138,7 +144,7 @@ export async function runDaemon(args: string[] = [], io: CommandIo = {}): Promis
   }
 
   if (command === "serve") {
-    const parsed = parseServeArgs(args.slice(1))
+    const parsed = parseServeArgs(args.slice(1), io.env || process.env)
     if (!parsed.statePath || !parsed.token || !parsed.version) {
       write(stderr, "Missing daemon serve arguments.\n")
       return 1

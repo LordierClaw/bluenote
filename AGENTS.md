@@ -31,7 +31,7 @@ Must remain Node `>=16.14 <17 || >=18` compatible. Lazy-load or spawn heavy/runt
 - Do not import sibling `src/*`, `dist/*`, tests, or hidden internals.
 - If a needed command API does not exist, add it in the owning repo first.
 - Current direct dependency name:
-  - `@lordierclaw/bluenote-core`: `file:../bluenote-core`
+  - `@lordierclaw/bluenote-core`: pinned release dependency, currently a GitHub commit dependency until npm package publication is available
 - Optional clients are independent global packages discovered through `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
 ## Dependency rules

@@ -18,7 +18,7 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 ```json
 {
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core"
+    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#<pinned-commit-sha>"
   }
 }
 ```
