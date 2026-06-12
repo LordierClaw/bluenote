@@ -5,6 +5,8 @@ import type { AddressInfo } from "net"
 import { ensureParentDir } from "./paths"
 import { createDaemonRouter, writeJson } from "./router"
 
+const BLUENOTE_DAEMON_API_VERSION = "1"
+
 export type DaemonMetadata = {
   pid: number
   url: string
@@ -33,6 +35,10 @@ export async function startDaemonServer(options: DaemonServerOptions): Promise<v
       name: "bluenote-daemon",
       version: options.version,
       mode: "local-only",
+      apiVersion: BLUENOTE_DAEMON_API_VERSION,
+      workspaceApi: true,
+      notesApi: false,
+      aiApi: false,
       clients: {
         web: { daemonEnvironment: true },
         tui: { daemonEnvironment: true },

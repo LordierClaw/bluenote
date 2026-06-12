@@ -468,6 +468,16 @@ async function testDaemonHealthAndCapabilities() {
     assert.equal(capabilities.json.name, 'bluenote-daemon');
     assert.equal(capabilities.json.mode, 'local-only');
     assert.equal(capabilities.json.version, packageJson.version);
+    assert.equal(capabilities.json.apiVersion, '1');
+    assert.deepEqual({
+      workspaceApi: capabilities.json.workspaceApi,
+      notesApi: capabilities.json.notesApi,
+      aiApi: capabilities.json.aiApi,
+    }, {
+      workspaceApi: true,
+      notesApi: false,
+      aiApi: false,
+    });
     assert.ok(capabilities.json.clients.web);
     assert.ok(capabilities.json.clients.tui);
   } finally {
