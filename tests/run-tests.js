@@ -3,6 +3,7 @@
 const assert = require('assert').strict;
 const EventEmitter = require('events');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 
@@ -68,6 +69,24 @@ function writeDaemonMetadata(env, metadata) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function httpGet(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.on('error', reject);
+    request.setTimeout(5000, () => request.destroy(new Error('request timed out')));
+  });
+}
+
+async function httpGetJson(url, headers = {}) {
+  const response = await httpGet(url, headers);
+  return { status: response.status, json: JSON.parse(response.body) };
 }
 
 async function testPackageMetadata() {
@@ -426,16 +445,16 @@ async function testDaemonHealthAndCapabilities() {
     const started = await runCli(['daemon', 'start'], { env });
     assert.equal(started.code, 0);
     const metadata = JSON.parse(fs.readFileSync(path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'daemon.json'), 'utf8'));
-    const health = await fetch(`${metadata.url}/health`).then((response) => response.json());
-    assert.deepEqual(health, { ok: true, name: 'bluenote-daemon', version: packageJson.version });
-    const unauthenticated = await fetch(`${metadata.url}/capabilities`);
+    const health = await httpGetJson(`${metadata.url}/health`);
+    assert.deepEqual(health.json, { ok: true, name: 'bluenote-daemon', version: packageJson.version });
+    const unauthenticated = await httpGet(`${metadata.url}/capabilities`);
     assert.equal(unauthenticated.status, 401);
-    const capabilities = await fetch(`${metadata.url}/capabilities`, { headers: { authorization: `Bearer ${metadata.token}` } }).then((response) => response.json());
-    assert.equal(capabilities.name, 'bluenote-daemon');
-    assert.equal(capabilities.mode, 'local-only');
-    assert.equal(capabilities.version, packageJson.version);
-    assert.ok(capabilities.clients.web);
-    assert.ok(capabilities.clients.tui);
+    const capabilities = await httpGetJson(`${metadata.url}/capabilities`, { authorization: `Bearer ${metadata.token}` });
+    assert.equal(capabilities.json.name, 'bluenote-daemon');
+    assert.equal(capabilities.json.mode, 'local-only');
+    assert.equal(capabilities.json.version, packageJson.version);
+    assert.ok(capabilities.json.clients.web);
+    assert.ok(capabilities.json.clients.tui);
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
