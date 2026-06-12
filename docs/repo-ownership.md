@@ -25,3 +25,10 @@
 - Clients consume core public APIs and do not duplicate core semantics.
 - Distribution orchestrates commands and lazy-loads clients.
 - Cross-repo imports must use public package exports, never internals.
+
+## Install roles
+
+- `@lordierclaw/bluenote` is the user-facing app entrypoint. It provides `bluenote` and `bn`.
+- `@lordierclaw/bluenote-core` is a library dependency. End users normally do not install it globally.
+- `bluenote-webui` and `bluenote-term` are optional client packages installed separately so their public executables are on `PATH`.
+- Source checkout verification/install order is dependency-first: `bluenote-core`, optional clients (`bluenote-webui`, `bluenote-term`), then `bluenote` last.

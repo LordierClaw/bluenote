@@ -11,15 +11,53 @@
 
 ## End-user install model
 
-Install the distribution CLI and whichever optional clients you want as independent global packages:
+Install the official app entrypoint first, then install whichever UI clients you want. The core package is a runtime dependency of the distribution/clients; end users normally do **not** run `npm install -g @lordierclaw/bluenote-core` separately.
 
 ```sh
 npm install -g @lordierclaw/bluenote
+bluenote doctor
+
+# Optional clients. Install one or both depending on how you want to use BlueNote.
 npm install -g bluenote-webui
 npm install -g bluenote-term
+
+# Confirm the distribution can find the clients on PATH.
+bluenote doctor
 ```
 
-The distribution CLI does not bundle WebUI/TUI. `bluenote doctor` reports whether optional client executables are present on `PATH`.
+The distribution CLI does not bundle WebUI/TUI. `bluenote doctor` reports whether optional client executables are present on `PATH` and whether Bun is available for the terminal client.
+
+### Install from sibling source checkouts
+
+When installing from these repositories before all packages are published, build/check from the dependency leaf outward:
+
+```sh
+# 1. Core library: required by the distribution and clients.
+cd ../bluenote-core
+npm ci --include=dev
+npm run check
+
+# 2. Optional clients: install/check the ones you want available on PATH.
+cd ../bluenote-webui
+npm ci --include=dev
+npm run check
+npm link
+
+cd ../bluenote-term
+bun install
+bun run check
+bun link
+
+# 3. Distribution CLI: the app entrypoint users run as bluenote/bn.
+cd ../bluenote
+npm ci --include=dev
+npm run check
+npm link
+
+bluenote doctor
+```
+
+For release-like dependency modes, prefer published npm versions or pinned immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
 
 ## Commands
 
@@ -68,7 +106,7 @@ Local file dependencies are used for multi-repo development only, not as the end
 
 Optional clients are installed separately in end-user and manual-verification flows; they are not required dependencies of `@lordierclaw/bluenote`.
 
-For release-like dependency modes, prefer published npm versions or pinned immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
+Install order for source checkouts is core first, optional clients second, distribution last. At runtime, users launch the app through `bluenote`/`bn`; the distribution starts clients through their public executables (`bluenote-webui`, `bluenote-term`) instead of importing client internals.
 
 ## Development checks
 

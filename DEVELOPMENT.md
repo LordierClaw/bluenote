@@ -23,18 +23,52 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 }
 ```
 
-End-user optional clients are independent global packages exposing `bluenote-webui` and `bluenote-term` executables.
+End-user optional clients are independent global packages exposing `bluenote-webui` and `bluenote-term` executables. End users normally install the app entrypoint first and then add clients:
+
+```sh
+npm install -g @lordierclaw/bluenote
+npm install -g bluenote-webui   # optional browser UI
+npm install -g bluenote-term    # optional terminal UI; requires Bun
+bluenote doctor
+```
+
+`@lordierclaw/bluenote-core` is a library dependency, not a user-facing command package. Install it directly only for library development or when manually wiring local source checkouts.
 
 When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches. Do not use branch dependencies such as `#main` for release-like dependency modes.
 
-## Build/check order
+## Build/check and local install order
 
-For cross-repo changes, verify from the dependency leaf outward:
+For cross-repo changes, verify and link from the dependency leaf outward:
 
 1. `bluenote-core`: `npm run check`
 2. `bluenote-term`: `bun run check`
 3. `bluenote-webui`: `npm run check`
 4. `bluenote`: `npm run check`
+
+For a manual source install that behaves like the app, build/check core first, link the optional clients you want on `PATH`, then link the distribution CLI last:
+
+```sh
+cd ../bluenote-core
+npm ci --include=dev
+npm run check
+
+cd ../bluenote-webui
+npm ci --include=dev
+npm run check
+npm link
+
+cd ../bluenote-term
+bun install
+bun run check
+bun link
+
+cd ../bluenote
+npm ci --include=dev
+npm run check
+npm link
+
+bluenote doctor
+```
 
 For docs-only changes, use `git status` plus basic file inspection unless package files or code changed. When documentation describes the CLI contract, also run the relevant help/smoke commands when practical.
 
