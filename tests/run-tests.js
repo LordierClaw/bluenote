@@ -47,14 +47,16 @@ function writeExecutable(filePath, content = '#!/usr/bin/env node\nprocess.exit(
 
 function makeDaemonEnv() {
   const root = makeTempDir('daemon-env');
+  const env = {
+    ...process.env,
+    BLUENOTE_CONFIG_HOME: path.join(root, 'config'),
+    BLUENOTE_DATA_HOME: path.join(root, 'data'),
+    BLUENOTE_CACHE_HOME: path.join(root, 'cache'),
+  };
+  delete env.BLUENOTE_DAEMON_STATE;
   return {
     root,
-    env: {
-      ...process.env,
-      BLUENOTE_CONFIG_HOME: path.join(root, 'config'),
-      BLUENOTE_DATA_HOME: path.join(root, 'data'),
-      BLUENOTE_CACHE_HOME: path.join(root, 'cache'),
-    },
+    env,
   };
 }
 
