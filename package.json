@@ -18,7 +18,7 @@
     "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
-    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#826914e2ef865aafa0c9cdcabfb362a0e43850d1"
+    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#920f5c1030604a5be98d8d70d87d06ec0a57fb28"
   },
   "devDependencies": {
     "@types/node": "16.18.126",
