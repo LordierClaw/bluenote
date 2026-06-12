@@ -11,6 +11,35 @@ import { write } from "../utils/write"
 
 const OPTIONAL_CLIENTS = ["bluenote-webui", "bluenote-term"] as const
 
+function isWindowsShellCommand(commandPath: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
+}
+
+function runClientCheck(
+  commandPath: string,
+  args: string[],
+  io: CommandIo,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): { ok: boolean; stdout: string; stderr: string } {
+  const spawnSync = io.spawnSync || defaultSpawnSync
+  const result = spawnSync(commandPath, args, {
+    encoding: "utf8",
+    env,
+    shell: isWindowsShellCommand(commandPath, platform),
+    timeout: 5_000,
+  })
+  return {
+    ok: !result.error && result.status === 0,
+    stdout: String(result.stdout || ""),
+    stderr: String(result.stderr || ""),
+  }
+}
+
+function firstLine(value: string): string | undefined {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)
+}
+
 function checkBun(io: CommandIo): { available: boolean; version?: string } {
   const spawnSync = io.spawnSync || defaultSpawnSync
   const result = spawnSync("bun", ["--version"], { encoding: "utf8", env: io.env || process.env })
@@ -45,10 +74,28 @@ export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promi
   write(stdout, "\nClients\n")
   for (const client of OPTIONAL_CLIENTS) {
     const resolution = findCommandOnPath(client, { path: env.PATH, platform, pathext: env.PATHEXT })
-    write(stdout, `  ${client}: ${resolution ? "found" : "missing"}\n`)
-    if (resolution) write(stdout, `    path: ${resolution.path}\n`)
-    write(stdout, "    version: unavailable\n")
-    write(stdout, `    daemon handshake: ${daemon.state === "running" ? "not checked" : "not checked"}\n`)
+    if (!resolution) {
+      write(stdout, `  ${client}: missing\n`)
+      write(stdout, "    version: unavailable\n")
+      write(stdout, "    daemon handshake: not checked\n")
+      continue
+    }
+
+    const clientEnv = { ...env }
+    if (daemon.state === "running" && daemon.metadata) {
+      clientEnv.BLUENOTE_DAEMON_URL = daemon.metadata.url
+      clientEnv.BLUENOTE_DAEMON_TOKEN = daemon.metadata.token
+    }
+    const version = runClientCheck(resolution.path, ["--version"], io, platform, clientEnv)
+    const handshake = daemon.state === "running" && daemon.metadata
+      ? runClientCheck(resolution.path, ["--check-daemon"], io, platform, clientEnv)
+      : undefined
+    const status = version.ok && (!handshake || handshake.ok) ? "found" : "broken"
+
+    write(stdout, `  ${client}: ${status}\n`)
+    write(stdout, `    path: ${resolution.path}\n`)
+    write(stdout, `    version: ${version.ok ? firstLine(version.stdout) || "available" : "unavailable"}\n`)
+    write(stdout, `    daemon handshake: ${handshake ? handshake.ok ? "ok" : "failed" : "not checked"}\n`)
   }
 
   const bun = checkBun(io)

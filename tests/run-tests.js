@@ -139,6 +139,10 @@ async function testCommandDiscovery() {
     command: 'bluenote-webui',
     path: webPath,
   });
+  const nonExecutablePath = path.join(tempBin, 'bluenote-term');
+  fs.writeFileSync(nonExecutablePath, '#!/usr/bin/env node\nprocess.exit(0)\n');
+  fs.chmodSync(nonExecutablePath, 0o644);
+  assert.equal(findCommandOnPath('bluenote-term', { path: tempBin, platform: 'linux' }), undefined);
   assert.equal(findCommandOnPath('missing-client', { path: tempBin, platform: 'linux' }), undefined);
 
   const winBin = makeTempDir('path-win-bin');
@@ -183,8 +187,27 @@ async function testDoctorReportsOptionalClients() {
   assert.equal(found.code, 0);
   assert.match(found.stdout, /bluenote-webui: found/);
   assert.match(found.stdout, new RegExp(escapeRegExp(webPath)));
+  assert.match(found.stdout, /version: 1\.3\.14/);
   assert.match(found.stdout, /bluenote-term: found/);
   assert.match(found.stdout, new RegExp(escapeRegExp(termPath)));
+}
+
+async function testDoctorReportsBrokenClients() {
+  const tempBin = makeTempDir('doctor-broken-clients');
+  const webPath = path.join(tempBin, 'bluenote-webui');
+  writeExecutable(webPath);
+  const found = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 1, stdout: '', stderr: 'broken client' };
+    },
+  });
+  assert.equal(found.code, 0);
+  assert.match(found.stdout, /bluenote-webui: broken/);
+  assert.match(found.stdout, /version: unavailable/);
 }
 
 async function testUnknownCommand() {
@@ -442,6 +465,7 @@ const tests = [
   testDoctorDoesNotLoadClients,
   testCommandDiscovery,
   testDoctorReportsOptionalClients,
+  testDoctorReportsBrokenClients,
   testUnknownCommand,
   testDaemonLifecycle,
   testDaemonStartDoesNotExposeTokenInArgv,

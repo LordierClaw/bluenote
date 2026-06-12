@@ -12,10 +12,12 @@ export type CommandResolution = {
   path: string
 }
 
-function isExecutableFile(filePath: string): boolean {
+function isExecutableFile(filePath: string, platform: NodeJS.Platform): boolean {
   try {
     const stat = fs.statSync(filePath)
-    return stat.isFile()
+    if (!stat.isFile()) return false
+    if (platform === "win32") return true
+    return (stat.mode & 0o111) !== 0
   } catch {
     return false
   }
@@ -40,7 +42,7 @@ export function findCommandOnPath(command: string, options: CommandDiscoveryOpti
   for (const directory of pathEntries) {
     for (const candidate of candidates) {
       const candidatePath = path.resolve(directory, candidate)
-      if (isExecutableFile(candidatePath)) return { command, path: candidatePath }
+      if (isExecutableFile(candidatePath, platform)) return { command, path: candidatePath }
     }
   }
 
