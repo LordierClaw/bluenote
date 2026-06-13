@@ -1,0 +1,114 @@
+import { spawnSync as defaultSpawnSync } from "child_process"
+import os from "os"
+
+import type { CommandIo } from "../types"
+import { getBluenoteStateDir, getDaemonStatePath } from "../daemon/paths"
+import { findCommandOnPath } from "../utils/command-discovery"
+import { readDaemonStatus } from "../utils/daemon-state"
+import { readOwnPackageInfo } from "../utils/package-info"
+import { isSupportedNodeVersion, nodeRequirementText } from "../utils/runtime-requirements"
+import { write } from "../utils/write"
+
+const OPTIONAL_CLIENTS = ["bluenote-webui", "bluenote-term"] as const
+
+function isWindowsShellCommand(commandPath: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
+}
+
+function runClientCheck(
+  commandPath: string,
+  args: string[],
+  io: CommandIo,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): { ok: boolean; stdout: string; stderr: string } {
+  const spawnSync = io.spawnSync || defaultSpawnSync
+  const result = spawnSync(commandPath, args, {
+    encoding: "utf8",
+    env,
+    shell: isWindowsShellCommand(commandPath, platform),
+    timeout: 5_000,
+  })
+  return {
+    ok: !result.error && result.status === 0,
+    stdout: String(result.stdout || ""),
+    stderr: String(result.stderr || ""),
+  }
+}
+
+function firstLine(value: string): string | undefined {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)
+}
+
+function checkBun(io: CommandIo): { available: boolean; version?: string } {
+  const spawnSync = io.spawnSync || defaultSpawnSync
+  const result = spawnSync("bun", ["--version"], { encoding: "utf8", env: io.env || process.env })
+  if (result.error || result.status !== 0) return { available: false }
+  return { available: true, version: String(result.stdout || "").trim() }
+}
+
+export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promise<number> {
+  const stdout = io.stdout || process.stdout
+  const env = io.env || process.env
+  const nodeVersion = io.nodeVersion || process.versions.node
+  const platform = io.platform || process.platform
+  const supportedNode = isSupportedNodeVersion(nodeVersion)
+  const ownPackage = readOwnPackageInfo()
+
+  write(stdout, "BlueNote doctor\n\n")
+  write(stdout, "Distribution\n")
+  write(stdout, "  command: ok\n")
+  write(stdout, `  version: ${ownPackage.version}\n`)
+  write(stdout, `  platform: ${platform} (${os.arch()})\n`)
+  write(stdout, `  node: ${supportedNode ? "ok" : "unsupported"} (${nodeVersion}; requires ${nodeRequirementText()})\n`)
+  write(stdout, `Node status: ${supportedNode ? "ok" : "unsupported"}\n`)
+
+  const daemon = await readDaemonStatus(env)
+  write(stdout, "\nDaemon\n")
+  write(stdout, `  status: ${daemon.state}\n`)
+  write(stdout, `  endpoint: ${daemon.metadata ? daemon.metadata.url : "unavailable"}\n`)
+  write(stdout, `  pid: ${daemon.metadata?.pid || "unavailable"}\n`)
+  write(stdout, `  token: ${daemon.metadata?.token ? "present" : "missing"}\n`)
+  write(stdout, `  health: ${daemon.healthOk ? "ok" : daemon.state === "stopped" ? "not checked" : "failed"}\n`)
+
+  write(stdout, "\nClients\n")
+  for (const client of OPTIONAL_CLIENTS) {
+    const resolution = findCommandOnPath(client, { path: env.PATH, platform, pathext: env.PATHEXT })
+    if (!resolution) {
+      write(stdout, `  ${client}: missing\n`)
+      write(stdout, "    version: unavailable\n")
+      write(stdout, "    daemon handshake: not checked\n")
+      continue
+    }
+
+    const clientEnv = { ...env }
+    if (daemon.state === "running" && daemon.metadata) {
+      clientEnv.BLUENOTE_DAEMON_URL = daemon.metadata.url
+      clientEnv.BLUENOTE_DAEMON_TOKEN = daemon.metadata.token
+    }
+    const version = runClientCheck(resolution.path, ["--version"], io, platform, clientEnv)
+    const handshake = daemon.state === "running" && daemon.metadata
+      ? runClientCheck(resolution.path, ["--check-daemon"], io, platform, clientEnv)
+      : undefined
+    const status = version.ok && (!handshake || handshake.ok) ? "found" : "broken"
+
+    write(stdout, `  ${client}: ${status}\n`)
+    write(stdout, `    path: ${resolution.path}\n`)
+    write(stdout, `    version: ${version.ok ? firstLine(version.stdout) || "available" : "unavailable"}\n`)
+    write(stdout, `    daemon handshake: ${handshake ? handshake.ok ? "ok" : "failed" : "not checked"}\n`)
+  }
+
+  const bun = checkBun(io)
+  write(stdout, `  Bun for TUI: ${bun.available ? `available${bun.version ? ` (${bun.version})` : ""}` : "not found; install Bun to run bluenote tui"}\n`)
+
+  write(stdout, "\nConfig\n")
+  write(stdout, `  config dir: ${getBluenoteStateDir(env)}\n`)
+  write(stdout, `  daemon state: ${getDaemonStatePath(env)}\n`)
+  write(stdout, `  daemon endpoint: ${daemon.metadata ? daemon.metadata.url : "unavailable"}\n`)
+
+  write(stdout, "\nAI\n")
+  write(stdout, "  provider: not configured\n")
+  write(stdout, "  secrets: not printed\n")
+
+  return supportedNode ? 0 : 1
+}

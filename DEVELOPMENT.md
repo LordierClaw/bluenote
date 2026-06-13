@@ -13,60 +13,126 @@ The parent folder may also contain local `.agent/*` workflow memory. If the pare
 
 ## Local dependency strategy
 
-The distribution package currently has no eager runtime dependencies on sibling repos. `bluenote tui` and `bluenote web` lazy-load the public client packages only when those commands run.
-
-During local multi-repo development, use local file dependencies where practical when testing client command integration:
+`@lordierclaw/bluenote` depends directly on core for daemon-side behavior. Optional clients are installed separately and discovered through public executables on `PATH`:
 
 ```json
 {
   "dependencies": {
-    "@lordierclaw/bluenote-core": "file:../bluenote-core",
-    "bluenote-term": "file:../bluenote-term/packages/term",
-    "bluenote-webui": "file:../bluenote-webui"
+    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#<pinned-commit-sha>"
   }
 }
 ```
 
-When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches.
+End-user optional clients are independent global packages exposing `bluenote-webui` and `bluenote-term` executables. End users normally install the app entrypoint first and then add clients:
 
-## Build/check order
+```sh
+npm install -g @lordierclaw/bluenote
+npm install -g bluenote-webui   # optional browser UI
+npm install -g bluenote-term    # optional terminal UI; requires Bun
+bluenote doctor
+```
 
-For cross-repo changes, verify from the dependency leaf outward:
+`@lordierclaw/bluenote-core` is a library dependency, not a user-facing command package. Install it directly only for library development or when manually wiring local source checkouts.
+
+When publishing or testing reproducible releases, prefer published npm versions or pinned immutable Git tags/commits over moving branches. Do not use branch dependencies such as `#main` for release-like dependency modes.
+
+## Build/check and local install order
+
+For cross-repo changes, verify and link from the dependency leaf outward:
 
 1. `bluenote-core`: `npm run check`
 2. `bluenote-term`: `bun run check`
 3. `bluenote-webui`: `npm run check`
-4. `bluenote`: `npm test` or `npm run check`
+4. `bluenote`: `npm run check`
+
+For a manual source install that behaves like the app, link the distribution CLI first, then add optional clients. The distribution package installs its pinned `@lordierclaw/bluenote-core` dependency during `npm ci`; do not globally link core for normal app setup.
+
+```sh
+cd ../bluenote
+npm ci --include=dev
+npm run check
+npm link
+bluenote doctor
+
+cd ../bluenote-webui
+npm ci --include=dev
+npm run check
+npm link
+bluenote doctor
+
+cd ../bluenote-term
+bun install
+bun run check
+cd packages/term
+bun link
+cd ../..
+
+bluenote doctor
+bluenote daemon start
+bluenote web
+# or: bluenote tui
+```
+
+Ensure npm and Bun link directories are visible before checking client discovery:
+
+```sh
+# bash/zsh, current shell
+export PATH="$(npm prefix -g)/bin:$HOME/.bun/bin:$PATH"
+```
+
+```fish
+# fish, permanent user PATH
+fish_add_path -U (npm prefix -g)/bin
+fish_add_path -U ~/.bun/bin
+```
+
+```cmd
+:: cmd.exe, current shell
+for /f "delims=" %i in ('npm prefix -g') do set "NPM_PREFIX=%i"
+if exist "%NPM_PREFIX%\bin" (set "PATH=%NPM_PREFIX%\bin;%USERPROFILE%\.bun\bin;%PATH%") else (set "PATH=%NPM_PREFIX%;%USERPROFILE%\.bun\bin;%PATH%")
+```
+
+```powershell
+# PowerShell, current shell
+$npmPrefix = npm prefix -g
+$npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bin" } else { $npmPrefix }
+$env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"
+```
+
+If the task changes `bluenote-core`, run `npm ci --include=dev && npm run check` in `../bluenote-core` before checking dependent packages.
 
 For docs-only changes, use `git status` plus basic file inspection unless package files or code changed. When documentation describes the CLI contract, also run the relevant help/smoke commands when practical.
 
 ## Distribution package scripts
 
-From this repo:
-
 ```sh
-npm test
+npm install
+npm run clean
+npm run typecheck
+npm run test
+npm run build
 npm run check
 ```
 
-`npm run check` currently delegates to `npm test`.
+`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run build` also marks `dist/bin.js` executable so `npm link` creates runnable `bluenote`/`bn` commands. `npm run check` runs typecheck, tests, and a final build.
 
 ## Implemented command surface
 
-- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`.
-- `bluenote version`: prints the distribution package version.
-- `bluenote doctor`: reports Node version, package baseline, and support status; it does not perform workspace checks.
-- `bluenote tui`: lazy-loads `bluenote-term` through its public command API.
-- `bluenote web`: lazy-loads `bluenote-webui` through its public command API.
-- `bluenote daemon --help`: scaffold help only. `bluenote daemon` exits nonzero until daemon/runtime/sync protocol work is designed and implemented.
+- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
+- `bluenote version`: distribution version plus required runtime package metadata; no heavy client imports.
+- `bluenote doctor`: platform, Node compatibility, daemon status, optional `bluenote-webui`/`bluenote-term` PATH discovery, and Bun availability; no secrets or workspace mutation.
+- `bluenote daemon start|status|stop`: minimal local-only HTTP daemon lifecycle with `/health` and `/capabilities`; tokens are stored in daemon metadata but never printed.
+- `bluenote web [...args]`: requires daemon metadata, discovers the public `bluenote-webui` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
+- `bluenote tui [...args]`: requires daemon metadata, discovers the public `bluenote-term` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
+- `bn`: alias for the same distribution binary.
 
 ## Choosing the correct repo for a feature
 
 - Note model, storage, search, AI, and core API semantics -> `bluenote-core`.
 - Terminal layout, keybindings, OpenTUI behavior, terminal command API -> `bluenote-term`.
 - Browser UI, local web server/proxy, setup flow -> `bluenote-webui`.
-- Top-level command routing, help, version, doctor, daemon scaffold, binary packaging -> `bluenote`.
-- Real daemon/runtime/sync protocol -> design cross-repo first; protocol/core first; clients later.
+- Top-level command routing, help, version, doctor, minimal local daemon lifecycle, PATH client discovery/launch, binary packaging -> `bluenote`.
+- Expanded daemon/runtime/sync protocol beyond local health/capabilities -> design cross-repo first; protocol/core first; clients later.
 
 ## Runtime compatibility matrix
 
@@ -75,16 +141,17 @@ npm run check
 | `bluenote-core` | Node `>=16.14 <17 || >=18`, npm |
 | `bluenote-term` | Bun/OpenTUI allowed; newer Node allowed when required |
 | `bluenote-webui` | Node `>=16.14 <17 || >=18`, npm |
-| `bluenote` | Node `>=16.14` package engine; lazy-load heavy clients |
+| `bluenote` | Node `>=16.14 <17 || >=18`; lazy-load/spawn heavy clients only for their commands |
 
 ## Never import internal paths
 
-Across repos, import only public package exports. Forbidden examples:
+Across repos, import only public package exports or use public package bins. Forbidden examples:
 
 ```ts
 import "@lordierclaw/bluenote-core/src/..."
 import "../bluenote-core/src/..."
 import "../bluenote-term/packages/term/src/..."
+import "../bluenote-webui/src/..."
 ```
 
 If a client or distribution command needs new behavior, add a public API in the owning repo first, with tests and docs there.
