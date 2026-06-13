@@ -521,9 +521,11 @@ async function testWebAndTuiDoNotLoadClients() {
 }
 
 async function testBuildOutputExists() {
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'dist', 'bin.js')));
-  const bin = fs.readFileSync(path.join(__dirname, '..', 'dist', 'bin.js'), 'utf8');
+  const binPath = path.join(__dirname, '..', 'dist', 'bin.js');
+  assert.ok(fs.existsSync(binPath));
+  const bin = fs.readFileSync(binPath, 'utf8');
   assert.ok(bin.startsWith('#!/usr/bin/env node'));
+  assert.equal(fs.statSync(binPath).mode & 0o111, 0o111);
 }
 
 const tests = [

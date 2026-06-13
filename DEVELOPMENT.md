@@ -45,30 +45,61 @@ For cross-repo changes, verify and link from the dependency leaf outward:
 3. `bluenote-webui`: `npm run check`
 4. `bluenote`: `npm run check`
 
-For a manual source install that behaves like the app, build/check core first, link the optional clients you want on `PATH`, then link the distribution CLI last:
+For a manual source install that behaves like the app, link the distribution CLI first, then add optional clients. The distribution package installs its pinned `@lordierclaw/bluenote-core` dependency during `npm ci`; do not globally link core for normal app setup.
 
 ```sh
-cd ../bluenote-core
+cd ../bluenote
 npm ci --include=dev
 npm run check
+npm link
+bluenote doctor
 
 cd ../bluenote-webui
 npm ci --include=dev
 npm run check
 npm link
+bluenote doctor
 
 cd ../bluenote-term
 bun install
 bun run check
+cd packages/term
 bun link
-
-cd ../bluenote
-npm ci --include=dev
-npm run check
-npm link
+cd ../..
 
 bluenote doctor
+bluenote daemon start
+bluenote web
+# or: bluenote tui
 ```
+
+Ensure npm and Bun link directories are visible before checking client discovery:
+
+```sh
+# bash/zsh, current shell
+export PATH="$(npm prefix -g)/bin:$HOME/.bun/bin:$PATH"
+```
+
+```fish
+# fish, permanent user PATH
+fish_add_path -U (npm prefix -g)/bin
+fish_add_path -U ~/.bun/bin
+```
+
+```cmd
+:: cmd.exe, current shell
+for /f "delims=" %i in ('npm prefix -g') do set "NPM_PREFIX=%i"
+if exist "%NPM_PREFIX%\bin" (set "PATH=%NPM_PREFIX%\bin;%USERPROFILE%\.bun\bin;%PATH%") else (set "PATH=%NPM_PREFIX%;%USERPROFILE%\.bun\bin;%PATH%")
+```
+
+```powershell
+# PowerShell, current shell
+$npmPrefix = npm prefix -g
+$npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bin" } else { $npmPrefix }
+$env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"
+```
+
+If the task changes `bluenote-core`, run `npm ci --include=dev && npm run check` in `../bluenote-core` before checking dependent packages.
 
 For docs-only changes, use `git status` plus basic file inspection unless package files or code changed. When documentation describes the CLI contract, also run the relevant help/smoke commands when practical.
 
@@ -83,7 +114,7 @@ npm run build
 npm run check
 ```
 
-`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run check` runs typecheck, tests, and a final build.
+`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run build` also marks `dist/bin.js` executable so `npm link` creates runnable `bluenote`/`bn` commands. `npm run check` runs typecheck, tests, and a final build.
 
 ## Implemented command surface
 

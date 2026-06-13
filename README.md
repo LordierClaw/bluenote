@@ -29,33 +29,66 @@ The distribution CLI does not bundle WebUI/TUI. `bluenote doctor` reports whethe
 
 ### Install from sibling source checkouts
 
-When installing from these repositories before all packages are published, build/check from the dependency leaf outward:
+When installing from these repositories before all packages are published, link the distribution CLI first, then add optional clients. The package installs its pinned `@lordierclaw/bluenote-core` dependency during `npm ci`, so a separate global `bluenote-core` link is not needed for normal app setup.
 
 ```sh
-# 1. Core library: required by the distribution and clients.
-cd ../bluenote-core
-npm ci --include=dev
-npm run check
-
-# 2. Optional clients: install/check the ones you want available on PATH.
-cd ../bluenote-webui
-npm ci --include=dev
-npm run check
-npm link
-
-cd ../bluenote-term
-bun install
-bun run check
-bun link
-
-# 3. Distribution CLI: the app entrypoint users run as bluenote/bn.
+# 1. Distribution CLI: the app entrypoint users run as bluenote/bn.
 cd ../bluenote
 npm ci --include=dev
 npm run check
 npm link
-
 bluenote doctor
+
+# 2. Optional browser client.
+cd ../bluenote-webui
+npm ci --include=dev
+npm run check
+npm link
+bluenote doctor
+
+# 3. Optional terminal client. Link from the public package workspace.
+cd ../bluenote-term
+bun install
+bun run check
+cd packages/term
+bun link
+cd ../..
+bluenote doctor
+
+# 4. Start the daemon before launching clients.
+bluenote daemon start
+bluenote doctor
+bluenote web
+# or: bluenote tui
 ```
+
+Make sure linked npm and Bun commands are visible on `PATH` before running `bluenote doctor`:
+
+```sh
+# bash/zsh, current shell
+export PATH="$(npm prefix -g)/bin:$HOME/.bun/bin:$PATH"
+```
+
+```fish
+# fish, permanent user PATH
+fish_add_path -U (npm prefix -g)/bin
+fish_add_path -U ~/.bun/bin
+```
+
+```cmd
+:: cmd.exe, current shell
+for /f "delims=" %i in ('npm prefix -g') do set "NPM_PREFIX=%i"
+if exist "%NPM_PREFIX%\bin" (set "PATH=%NPM_PREFIX%\bin;%USERPROFILE%\.bun\bin;%PATH%") else (set "PATH=%NPM_PREFIX%;%USERPROFILE%\.bun\bin;%PATH%")
+```
+
+```powershell
+# PowerShell, current shell
+$npmPrefix = npm prefix -g
+$npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bin" } else { $npmPrefix }
+$env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"
+```
+
+If you are actively changing `bluenote-core`, run `npm ci --include=dev && npm run check` in `../bluenote-core` before checking the distribution or clients. End-user/source-link setup still runs through the distribution package and client executables.
 
 For release-like dependency modes, prefer published npm versions or pinned immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
 
@@ -106,7 +139,7 @@ Local file dependencies are used for multi-repo development only, not as the end
 
 Optional clients are installed separately in end-user and manual-verification flows; they are not required dependencies of `@lordierclaw/bluenote`.
 
-Install order for source checkouts is core first, optional clients second, distribution last. At runtime, users launch the app through `bluenote`/`bn`; the distribution starts clients through their public executables (`bluenote-webui`, `bluenote-term`) instead of importing client internals.
+Install order for source checkouts is distribution first, then optional clients. Check `bluenote-core` first only when you are actively changing the core library. At runtime, users launch the app through `bluenote`/`bn`; the distribution starts clients through their public executables (`bluenote-webui`, `bluenote-term`) instead of importing client internals.
 
 ## Development checks
 
