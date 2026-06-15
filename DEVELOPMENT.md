@@ -73,10 +73,10 @@ bluenote web
 # or: bluenote tui
 ```
 
-Ensure npm and Bun link directories are visible before checking client discovery:
+Ensure npm and Bun link directories are visible before checking client discovery. For a one-off shell, export them directly; for a persistent setup, add the same line to your shell profile (`~/.bashrc`, `~/.zshrc`, or equivalent):
 
 ```sh
-# bash/zsh, current shell
+# bash/zsh, current shell; add to ~/.bashrc or ~/.zshrc to persist
 export PATH="$(npm prefix -g)/bin:$HOME/.bun/bin:$PATH"
 ```
 
@@ -87,13 +87,13 @@ fish_add_path -U ~/.bun/bin
 ```
 
 ```cmd
-:: cmd.exe, current shell
+:: cmd.exe, current shell; add the resolved paths to your user PATH to persist
 for /f "delims=" %i in ('npm prefix -g') do set "NPM_PREFIX=%i"
 if exist "%NPM_PREFIX%\bin" (set "PATH=%NPM_PREFIX%\bin;%USERPROFILE%\.bun\bin;%PATH%") else (set "PATH=%NPM_PREFIX%;%USERPROFILE%\.bun\bin;%PATH%")
 ```
 
 ```powershell
-# PowerShell, current shell
+# PowerShell, current shell; add the resolved paths to your user PATH to persist
 $npmPrefix = npm prefix -g
 $npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bin" } else { $npmPrefix }
 $env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"

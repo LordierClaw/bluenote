@@ -31,4 +31,5 @@
 - `@lordierclaw/bluenote` is the user-facing app entrypoint. It provides `bluenote` and `bn`.
 - `@lordierclaw/bluenote-core` is a library dependency. End users normally do not install it globally.
 - `bluenote-webui` and `bluenote-term` are optional client packages installed separately so their public executables are on `PATH`.
-- Source checkout verification/install order is dependency-first: `bluenote-core`, optional clients (`bluenote-webui`, `bluenote-term`), then `bluenote` last.
+- Cross-repo verification order is dependency-first: `bluenote-core`, optional clients (`bluenote-webui`, `bluenote-term`), then `bluenote` last.
+- Manual source-link install order for app-like local use is distribution first, then optional clients, so `bluenote doctor` can verify each client executable as it is linked.
