@@ -10,6 +10,7 @@ const path = require('path');
 const cli = require('../dist/cli.js');
 const { findCommandOnPath } = require('../dist/utils/command-discovery.js');
 const packageJson = require('../package.json');
+const packageLock = require('../package-lock.json');
 
 function createStream() {
   let text = '';
@@ -105,6 +106,12 @@ async function httpGetJson(url, headers = {}) {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
+  assert.equal(packageJson.version, '0.1.0');
+  assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
+  assert.equal(packageLock.name, packageJson.name);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[''].name, packageJson.name);
+  assert.equal(packageLock.packages[''].version, packageJson.version);
   assert.equal(packageJson.bin.bluenote, './dist/bin.js');
   assert.equal(packageJson.bin.bn, './dist/bin.js');
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
@@ -134,7 +141,7 @@ async function testVersionDoesNotLoadClients() {
     },
   });
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /@lordierclaw\/bluenote 0\.0\.0/);
+  assert.match(result.stdout, new RegExp(`${escapeRegExp(packageJson.name)} ${escapeRegExp(packageJson.version)}`));
   assert.match(result.stdout, /@lordierclaw\/bluenote-core/);
   assert.doesNotMatch(result.stdout, /bluenote-term/);
   assert.doesNotMatch(result.stdout, /bluenote-webui/);

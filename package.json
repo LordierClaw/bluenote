@@ -1,8 +1,14 @@
 {
   "name": "@lordierclaw/bluenote",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Official BlueNote distribution CLI.",
   "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "bin": {
     "bluenote": "./dist/bin.js",
     "bn": "./dist/bin.js"
