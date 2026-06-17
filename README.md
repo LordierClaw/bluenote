@@ -1,38 +1,69 @@
 # BlueNote Distribution CLI
 
-`@lordierclaw/bluenote` is the official BlueNote distribution package and top-level command router. It keeps the binary thin: core note behavior stays in `@lordierclaw/bluenote-core`, the terminal UI stays in `bluenote-term`, and the local browser UI stays in `bluenote-webui`.
+`@lordierclaw/bluenote` is the official BlueNote app entrypoint and top-level command router. It exposes the `bluenote` and `bn` binaries, keeps distribution commands lightweight, and launches optional WebUI/TUI clients through their public executables.
 
-## Requirements
+## Role in BlueNote
 
-- Node.js `>=16.14 <17 || >=18` for distribution commands.
-- npm 8-compatible local development.
-- Optional UI clients are discovered as executables on `PATH`: `bluenote-webui` and `bluenote-term`.
-- Bun is required by the terminal client package, but not by lightweight distribution commands.
+This repo owns:
 
-## End-user install model
+- top-level `bluenote`/`bn` command routing
+- `--help`, `version`, and `doctor`
+- minimal local daemon lifecycle and capability reporting
+- optional client discovery on `PATH`
+- distribution packaging and install guidance
 
-Install the official app entrypoint first, then install whichever UI clients you want. The core package is a runtime dependency of the distribution/clients; end users normally do **not** run `npm install -g @lordierclaw/bluenote-core` separately.
+It does not own core note behavior, browser UI implementation, or terminal UI implementation. Those live in `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`.
+
+## Install
+
+Install the distribution CLI first, then whichever optional clients you want:
 
 ```sh
 npm install -g @lordierclaw/bluenote
 bluenote doctor
 
-# Optional clients. Install one or both depending on how you want to use BlueNote.
-npm install -g bluenote-webui
-npm install -g bluenote-term
-
-# Confirm the distribution can find the clients on PATH.
+# Optional browser UI and terminal UI clients.
+npm install -g @lordierclaw/bluenote-webui
+npm install -g @lordierclaw/bluenote-term
 bluenote doctor
 ```
 
-The distribution CLI does not bundle WebUI/TUI. `bluenote doctor` reports whether optional client executables are present on `PATH` and whether Bun is available for the terminal client.
+The distribution package does not bundle UI clients. `bluenote doctor` reports whether `bluenote-webui` and `bluenote-term` are present on `PATH`, whether Bun is available for the terminal client, and whether the local daemon is running.
 
-### Install from sibling source checkouts
-
-When installing from these repositories before all packages are published, link the distribution CLI first, then add optional clients. The package installs its pinned `@lordierclaw/bluenote-core` dependency during `npm ci`, so a separate global `bluenote-core` link is not needed for normal app setup.
+Uninstall globally installed app packages with the same scoped names:
 
 ```sh
-# 1. Distribution CLI: the app entrypoint users run as bluenote/bn.
+npm uninstall -g @lordierclaw/bluenote
+npm uninstall -g @lordierclaw/bluenote-webui
+npm uninstall -g @lordierclaw/bluenote-term
+```
+
+Run clients through the distribution command after starting the daemon:
+
+```sh
+bluenote daemon start
+bluenote web
+# or
+bluenote tui
+```
+
+`bn` is the same binary alias as `bluenote`.
+
+## Local development
+
+Expected sibling checkout layout:
+
+```text
+../bluenote-core
+../bluenote-webui
+../bluenote-term
+../bluenote
+```
+
+Manual source-link setup before all packages are published:
+
+```sh
+# 1. Distribution CLI.
 cd ../bluenote
 npm ci --include=dev
 npm run check
@@ -54,113 +85,65 @@ cd packages/term
 bun link
 cd ../..
 bluenote doctor
-
-# 4. Start the daemon before launching clients.
-bluenote daemon start
-bluenote doctor
-bluenote web
-# or: bluenote tui
 ```
 
-Make sure linked npm and Bun commands are visible on `PATH` before running `bluenote doctor`. For a one-off shell, export them directly; for a persistent setup, add the same line to your shell profile (`~/.bashrc`, `~/.zshrc`, or equivalent):
+If linked commands are not visible, add npm's global command directory and Bun's command directory to `PATH`:
 
 ```sh
-# bash/zsh, current shell; add to ~/.bashrc or ~/.zshrc to persist
 export PATH="$(npm prefix -g)/bin:$HOME/.bun/bin:$PATH"
 ```
 
 ```fish
-# fish, permanent user PATH
 fish_add_path -U (npm prefix -g)/bin
 fish_add_path -U ~/.bun/bin
 ```
 
 ```cmd
-:: cmd.exe, current shell; add the resolved paths to your user PATH to persist
 for /f "delims=" %i in ('npm prefix -g') do set "NPM_PREFIX=%i"
 if exist "%NPM_PREFIX%\bin" (set "PATH=%NPM_PREFIX%\bin;%USERPROFILE%\.bun\bin;%PATH%") else (set "PATH=%NPM_PREFIX%;%USERPROFILE%\.bun\bin;%PATH%")
 ```
 
 ```powershell
-# PowerShell, current shell; add the resolved paths to your user PATH to persist
 $npmPrefix = npm prefix -g
 $npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bin" } else { $npmPrefix }
 $env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"
 ```
 
-If you are actively changing `bluenote-core`, run `npm ci --include=dev && npm run check` in `../bluenote-core` before checking the distribution or clients. End-user/source-link setup still runs through the distribution package and client executables.
+Fast local install/uninstall scripts are planned later in this packaging sequence. Until those scripts land, use the manual link/unlink flow above.
 
-For release-like dependency modes, prefer published npm versions or pinned immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
-
-## Commands
+## Scripts
 
 ```sh
-bluenote --help
-bluenote version
-bluenote doctor
-bluenote tui [...args]
-bluenote web [...args]
-bluenote daemon start
-bluenote daemon status
-bluenote daemon stop
-```
-
-`bn` is exposed as the same binary alias as `bluenote`.
-
-Current command surface:
-
-- `bluenote --help` prints top-level help without importing terminal or web clients.
-- `bluenote version` prints the distribution package version and required runtime package versions from package metadata only. Optional client availability is reported by `bluenote doctor`.
-- `bluenote doctor` checks platform, Node compatibility, daemon state, optional client executables, and Bun availability for the TUI. It reports token presence without printing token values.
-- `bluenote daemon <start|status|stop>` manages a minimal local-only daemon with HTTP `/health` and `/capabilities` endpoints.
-- `bluenote web` launches the `bluenote-webui` executable found on `PATH` only when daemon metadata exists, passing daemon connection details through environment variables without printing tokens.
-- `bluenote tui` launches the `bluenote-term` executable found on `PATH` only when daemon metadata exists, passing daemon connection details through environment variables without printing tokens.
-
-## Local sibling checkout
-
-Expected local development layout:
-
-```text
-../bluenote-core
-../bluenote-term
-../bluenote-webui
-../bluenote
-```
-
-Local file dependencies are used for multi-repo development only, not as the end-user install path:
-
-```json
-{
-  "dependencies": {
-    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#<pinned-commit-sha>"
-  }
-}
-```
-
-Optional clients are installed separately in end-user and manual-verification flows; they are not required dependencies of `@lordierclaw/bluenote`.
-
-Manual source-link install order is distribution first, then optional clients, so `bluenote doctor` can verify each public executable as it is added. Cross-repo verification order remains dependency-first (`bluenote-core`, clients, then distribution) when you are actively changing shared code. At runtime, users launch the app through `bluenote`/`bn`; the distribution starts clients through their public executables (`bluenote-webui`, `bluenote-term`) instead of importing client internals.
-
-## Development checks
-
-```sh
-npm install
 npm run typecheck
 npm run test
 npm run build
 npm run check
+npm run version:status -- --allow-git-deps
 node dist/bin.js --help
 node dist/bin.js version
 node dist/bin.js doctor
 ```
 
-Baseline CI runs on Node 16.14 and intentionally does not require Bun for basic `--help`, `version`, or `doctor` smoke commands.
+`npm run version:status` checks the four sibling package names and versions. By default it rejects release-mode Git dependencies; pass `--allow-git-deps` for the current local-development pinned-Git state.
 
-## Ownership boundaries
+## Packaging and versions
 
-- Core note model, storage layout, search semantics, and AI behavior: `bluenote-core`.
-- Terminal layout, keybindings, OpenTUI behavior, and TUI command API: `bluenote-term`.
-- Browser UI, localhost server/proxy, and web setup flow: `bluenote-webui`.
-- Top-level routing, help, version, doctor, minimal local daemon lifecycle, PATH client discovery/launch, and distribution packaging: `bluenote`.
+The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` and `bn`.
 
-Cross-repo imports must use public package exports or public package bins only. Do not import sibling `src/*`, `dist/*`, tests, or hidden internals from this repo.
+The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
+
+For release-like dependency modes, prefer published npm versions or immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
+
+## Cross-platform notes
+
+- Supported distribution runtime: Node.js `>=16.14 <17 || >=18`.
+- Basic distribution commands do not require Bun.
+- The terminal client uses Bun/OpenTUI and should be installed separately.
+- The daemon is local-only and passes client connection details through environment variables without printing bearer tokens.
+- Use `bluenote doctor` after install/link changes to verify PATH, daemon state, and optional clients.
+
+## Related packages
+
+- `@lordierclaw/bluenote-core`: headless note model, storage, search, AI config/queue/provider behavior, and public core APIs.
+- `@lordierclaw/bluenote-webui`: optional local browser client and localhost server/proxy.
+- `@lordierclaw/bluenote-term`: optional terminal/TUI client and terminal command API.

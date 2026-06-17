@@ -144,6 +144,24 @@ async function httpGetJson(url, headers = {}) {
   return { status: response.status, json: JSON.parse(response.body) };
 }
 
+
+function readSiblingReadmes() {
+  const workspaceRoot = path.resolve(__dirname, '..', '..');
+  const readmes = {
+    bluenote: path.join(workspaceRoot, 'bluenote', 'README.md'),
+    'bluenote-core': path.join(workspaceRoot, 'bluenote-core', 'README.md'),
+    'bluenote-webui': path.join(workspaceRoot, 'bluenote-webui', 'README.md'),
+    'bluenote-term': path.join(workspaceRoot, 'bluenote-term', 'README.md'),
+  };
+  for (const readmePath of Object.values(readmes)) {
+    if (!fs.existsSync(readmePath)) {
+      process.stdout.write(`SKIP README contract: missing sibling README ${readmePath}\n`);
+      return undefined;
+    }
+  }
+  return Object.fromEntries(Object.entries(readmes).map(([repoName, readmePath]) => [repoName, fs.readFileSync(readmePath, 'utf8')]))
+}
+
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
   assert.equal(packageJson.version, '0.1.0');
@@ -213,6 +231,35 @@ async function testVersionStatusScriptFailures() {
   const missingPackage = runVersionStatus(['--workspace-root', missingRoot, '--allow-git-deps']);
   assert.notEqual(missingPackage.status, 0);
   assert.match(missingPackage.stderr, /missing package/);
+}
+
+async function testReadmeStructureContract() {
+  const readmes = readSiblingReadmes();
+  if (!readmes) return;
+
+  const requiredHeadings = [
+    '## Role in BlueNote',
+    '## Install',
+    '## Local development',
+    '## Scripts',
+    '## Packaging and versions',
+    '## Cross-platform notes',
+    '## Related packages',
+  ];
+
+  for (const [repoName, readme] of Object.entries(readmes)) {
+    let previousIndex = -1;
+    for (const heading of requiredHeadings) {
+      const index = readme.indexOf(heading);
+      assert.notEqual(index, -1, `${repoName} README missing ${heading}`);
+      assert.ok(index > previousIndex, `${repoName} README has ${heading} out of order`);
+      previousIndex = index;
+    }
+
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-(?:webui|term)\b/, `${repoName} README uses an old unscoped client package install example`);
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-core\b/, `${repoName} README uses an old unscoped core package install example`);
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote\b/, `${repoName} README uses an old unscoped distribution package install example`);
+  }
 }
 
 async function testHelpDoesNotLoadClients() {
@@ -632,6 +679,7 @@ const tests = [
   testPackageMetadata,
   testVersionStatusScript,
   testVersionStatusScriptFailures,
+  testReadmeStructureContract,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
