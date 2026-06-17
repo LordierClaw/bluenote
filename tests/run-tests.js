@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert').strict;
+const childProcess = require('child_process');
 const EventEmitter = require('events');
 const fs = require('fs');
 const http = require('http');
@@ -72,6 +73,45 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function writePackageJson(workspaceRoot, repoName, packageData) {
+  const packageDir = path.join(workspaceRoot, repoName);
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify(packageData, null, 2));
+}
+
+function writeVersionStatusFixture(overrides = {}) {
+  const workspaceRoot = makeTempDir('version-status');
+  const packages = {
+    bluenote: {
+      name: '@lordierclaw/bluenote',
+      version: '0.1.0',
+      dependencies: {
+        '@lordierclaw/bluenote-core': 'git+https://github.com/LordierClaw/bluenote-core.git#0123456789abcdef0123456789abcdef01234567',
+      },
+    },
+    'bluenote-core': { name: '@lordierclaw/bluenote-core', version: '0.1.0' },
+    'bluenote-webui': { name: '@lordierclaw/bluenote-webui', version: '0.1.0' },
+    'bluenote-term': { name: '@lordierclaw/bluenote-term', version: '0.1.0' },
+  };
+
+  for (const [repoName, packageData] of Object.entries(packages)) {
+    const packageRepoName = repoName === 'bluenote-term' ? path.join(repoName, 'packages', 'term') : repoName;
+    writePackageJson(workspaceRoot, packageRepoName, {
+      ...packageData,
+      ...(overrides[repoName] || {}),
+    });
+  }
+
+  return workspaceRoot;
+}
+
+function runVersionStatus(args = [], options = {}) {
+  return childProcess.spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'version-status.mjs'), ...args], {
+    cwd: options.cwd || path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+}
+
 function httpGet(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const request = http.get(url, { headers }, (response) => {
@@ -120,6 +160,59 @@ async function testPackageMetadata() {
   assert.match(packageJson.dependencies['@lordierclaw/bluenote-core'], /^git\+https:\/\/github\.com\/LordierClaw\/bluenote-core\.git#[0-9a-f]{40}$/);
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
+}
+
+async function testVersionStatusScript() {
+  const workspaceRoot = writeVersionStatusFixture();
+
+  const strictResult = runVersionStatus(['--workspace-root', workspaceRoot]);
+  assert.notEqual(strictResult.status, 0);
+  assert.match(strictResult.stderr, /Git dependency is not allowed in release mode/);
+
+  const result = runVersionStatus(['--workspace-root', workspaceRoot, '--allow-git-deps']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BlueNote package versions/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-core\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-webui\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-term\s+0\.1\.0/);
+  assert.equal(result.stderr, '');
+}
+
+async function testVersionStatusScriptFailures() {
+  const badNameRoot = writeVersionStatusFixture({
+    'bluenote-webui': { name: 'bluenote-webui' },
+  });
+  const badName = runVersionStatus(['--workspace-root', badNameRoot, '--allow-git-deps']);
+  assert.notEqual(badName.status, 0);
+  assert.match(badName.stderr, /expected @lordierclaw\/bluenote-webui/);
+
+  const badVersionRoot = writeVersionStatusFixture({
+    'bluenote-term': { version: 'not-semver' },
+  });
+  const badVersion = runVersionStatus(['--workspace-root', badVersionRoot, '--allow-git-deps']);
+  assert.notEqual(badVersion.status, 0);
+  assert.match(badVersion.stderr, /invalid semver version/);
+
+  const leadingZeroRoot = writeVersionStatusFixture({
+    'bluenote-core': { version: '01.2.3' },
+  });
+  const leadingZero = runVersionStatus(['--workspace-root', leadingZeroRoot, '--allow-git-deps']);
+  assert.notEqual(leadingZero.status, 0);
+  assert.match(leadingZero.stderr, /invalid semver version/);
+
+  const emptyPrereleaseRoot = writeVersionStatusFixture({
+    'bluenote': { version: '1.2.3-alpha..1' },
+  });
+  const emptyPrerelease = runVersionStatus(['--workspace-root', emptyPrereleaseRoot, '--allow-git-deps']);
+  assert.notEqual(emptyPrerelease.status, 0);
+  assert.match(emptyPrerelease.stderr, /invalid semver version/);
+
+  const missingRoot = writeVersionStatusFixture();
+  fs.rmSync(path.join(missingRoot, 'bluenote-core'), { recursive: true, force: true });
+  const missingPackage = runVersionStatus(['--workspace-root', missingRoot, '--allow-git-deps']);
+  assert.notEqual(missingPackage.status, 0);
+  assert.match(missingPackage.stderr, /missing package/);
 }
 
 async function testHelpDoesNotLoadClients() {
@@ -537,6 +630,8 @@ async function testBuildOutputExists() {
 
 const tests = [
   testPackageMetadata,
+  testVersionStatusScript,
+  testVersionStatusScriptFailures,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
