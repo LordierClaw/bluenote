@@ -16,44 +16,56 @@ It does not own core note behavior, browser UI implementation, or terminal UI im
 
 ## Install
 
-Install the distribution CLI first, then whichever optional clients you want:
+For non-technical users, use the installer scripts. They are interactive by default and safely select only the distribution CLI (`@lordierclaw/bluenote`) unless you opt into the WebUI, built TUI, or all clients. The default registry is npmjs; GitHub Packages is available when you have token/auth configured.
+
+Linux/macOS:
+
+```sh
+./scripts/install.sh
+./scripts/install.sh --dry-run
+./scripts/install.sh --yes
+./scripts/install.sh --with-web
+./scripts/install.sh --with-tui
+./scripts/install.sh --all
+./scripts/install.sh --registry github
+./scripts/uninstall.sh --dry-run
+./scripts/uninstall.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\install.ps1 -Interactive
+.\scripts\install.ps1 -DryRun
+.\scripts\install.ps1 -Yes
+.\scripts\install.ps1 -WithWeb
+.\scripts\install.ps1 -WithTui
+.\scripts\install.ps1 -All
+.\scripts\install.ps1 -Registry github
+.\scripts\uninstall.ps1 -DryRun
+.\scripts\uninstall.ps1
+```
+
+Installer options:
+
+- Linux/macOS install: `--interactive`, `--yes`, `--with-web`, `--with-tui`, `--all`, `--tag <tag>`, `--registry npm|github`, `--client-mode path|built|auto`, `--dry-run`.
+- Windows install: `-Interactive`, `-Yes`, `-WithWeb`, `-WithTui`, `-All`, `-Tag`, `-Registry npm|github`, `-ClientMode path|built|auto`, `-DryRun`.
+- Linux/macOS uninstall: `--purge-config`, `--purge-cache`, `--purge-data`, `--dry-run`.
+- Windows uninstall: `-PurgeConfig`, `-PurgeCache`, `-PurgeData`, `-DryRun`.
+
+The installer runs preflight checks before mutating state, detects common conflicts, and in interactive mode offers safe upgrade, repair, skip, or abort choices when conflicts are found. Non-interactive `--yes` / `-Yes` fails safely on unknown conflicts rather than overwriting. Failed partial installs print recovery guidance and attempt best-effort rollback of artifacts created during the current run.
+
+Uninstall stops the daemon first when possible and removes `@lordierclaw/bluenote`, `@lordierclaw/bluenote-webui`, and managed built terminal client artifacts/packages. Normal install and uninstall preserve user notes/config/data. `--purge-data` / `-PurgeData` is the only destructive user-data path and requires the exact typed confirmation phrase `delete my bluenote data`.
+
+The default `auto` client mode lets `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. The user TUI path uses a built terminal artifact/package and does not auto-install Bun or require Bun at runtime. `bluenote doctor` runs after installation and reports each client as `built`, `path`, `missing`, or `broken`.
+
+Manual npm install is also supported for advanced users:
 
 ```sh
 npm install -g @lordierclaw/bluenote
+npm install -g @lordierclaw/bluenote-webui # optional
+npm install -g @lordierclaw/bluenote-term  # optional built TUI package when available
 bluenote doctor
-
-# Optional browser UI and terminal UI clients.
-npm install -g @lordierclaw/bluenote-webui
-npm install -g @lordierclaw/bluenote-term
-bluenote doctor
-```
-
-User installer/uninstaller entrypoints are being built contract-first. Today they provide preflight and dry-run planning for Linux/macOS and Windows without performing the full Task 11 install mutation:
-
-```sh
-./scripts/install.sh --dry-run
-./scripts/install.sh --yes --dry-run
-./scripts/uninstall.sh --dry-run
-```
-
-```powershell
-.\scripts\install.ps1 -DryRun
-.\scripts\install.ps1 -Yes -DryRun
-.\scripts\uninstall.ps1 -DryRun
-```
-
-The Task 10 installer scaffold records contract categories before the full Task 11 installer mutation exists: PATH command conflicts (`bluenote`, `bn`, `bluenote-webui`, `bluenote-term`), old unscoped package names, older/newer scoped package versions, mixed npm/built-artifact installs, stale daemon process or metadata, partial installs, unknown files in built artifact directories, unwritable npm global prefixes, npm/GitHub Packages registry or auth failures, unsupported built TUI OS/architecture, missing `node`/`npm`, interrupted runs, and Windows PowerShell execution policy guidance. Current dry-run output shows the planned action/conflict model, validates supported flags, fails non-interactive `--yes` on detected unknown conflicts, and keeps recovery/rollback messaging in place. The full interactive prompt flow for choosing upgrade, repair, uninstall/reinstall, skipping optional clients, or aborting remains a Task 11 implementation step.
-
-Normal install and uninstall never overwrite or delete user notes/config/data. `--purge-data` / `-PurgeData` is the only destructive user-data path and requires the exact typed confirmation phrase `delete my bluenote data`.
-
-The distribution package does not bundle UI clients. In the default `auto` client mode, `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. Built terminal artifacts do not require Bun at runtime; Bun is only needed for source/development TUI usage. `bluenote doctor` reports each client as `built`, `path`, `missing`, or `broken`, including the executable path and version/daemon handshake where available.
-
-Uninstall globally installed app packages with the same scoped names:
-
-```sh
-npm uninstall -g @lordierclaw/bluenote
-npm uninstall -g @lordierclaw/bluenote-webui
-npm uninstall -g @lordierclaw/bluenote-term
 ```
 
 Run clients through the distribution command after starting the daemon:

@@ -1,4 +1,5 @@
 import fs from "fs"
+import os from "os"
 import path from "path"
 
 export type CommandDiscoveryOptions = {
@@ -21,6 +22,11 @@ export type ClientCommandResolution = CommandResolution & {
 export type ClientCommandDiscoveryOptions = CommandDiscoveryOptions & {
   env?: NodeJS.ProcessEnv
   clientMode?: string
+  builtClientDir?: string
+}
+
+type PersistedClientMode = {
+  mode?: string
   builtClientDir?: string
 }
 
@@ -78,6 +84,32 @@ function invalidModeMessage(source: string, value: string): string {
   return `Invalid ${source} "${value}". Expected auto, path, or built.\n`
 }
 
+function getClientModeConfigPath(env: NodeJS.ProcessEnv): string {
+  if (env.APPDATA && !env.BLUENOTE_CONFIG_HOME && !env.XDG_CONFIG_HOME) return path.join(env.APPDATA, "bluenote", "client-mode.env")
+  const configRoot = env.BLUENOTE_CONFIG_HOME || env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
+  return path.join(configRoot, "bluenote", "client-mode.env")
+}
+
+function readPersistedClientMode(env: NodeJS.ProcessEnv): PersistedClientMode {
+  try {
+    const content = fs.readFileSync(getClientModeConfigPath(env), "utf8")
+    const config: PersistedClientMode = {}
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith("#")) continue
+      const index = trimmed.indexOf("=")
+      if (index === -1) continue
+      const key = trimmed.slice(0, index)
+      const value = trimmed.slice(index + 1)
+      if (key === "BLUENOTE_CLIENT_MODE") config.mode = value
+      if (key === "BLUENOTE_BUILT_CLIENT_DIR") config.builtClientDir = value
+    }
+    return config
+  } catch {
+    return {}
+  }
+}
+
 export function parseClientModeArgs(args: string[], env: NodeJS.ProcessEnv = process.env): ParsedClientModeArgs {
   const remaining: string[] = []
   let mode: ClientRuntimeMode = "auto"
@@ -116,7 +148,8 @@ export function clientExecutableCandidates(command: string, platform: NodeJS.Pla
 
 function findBuiltClient(command: string, options: ClientCommandDiscoveryOptions = {}): CommandResolution | undefined {
   const env = options.env || process.env
-  const builtClientDir = options.builtClientDir || env.BLUENOTE_BUILT_CLIENT_DIR
+  const persisted = readPersistedClientMode(env)
+  const builtClientDir = options.builtClientDir || env.BLUENOTE_BUILT_CLIENT_DIR || persisted.builtClientDir
   if (!builtClientDir) return undefined
   const platform = options.platform || process.platform
   const candidates = clientExecutableCandidates(command, platform, options.pathext || env.PATHEXT)
@@ -129,7 +162,9 @@ function findBuiltClient(command: string, options: ClientCommandDiscoveryOptions
 
 export function resolveClientCommand(command: string, options: ClientCommandDiscoveryOptions = {}): ClientCommandResolution | undefined {
   const env = options.env || process.env
-  const mode = normalizeClientRuntimeMode(options.clientMode || env.BLUENOTE_CLIENT_MODE)
+  const persisted = readPersistedClientMode(env)
+  const configuredMode = options.clientMode && options.clientMode !== "auto" ? options.clientMode : env.BLUENOTE_CLIENT_MODE || persisted.mode
+  const mode = normalizeClientRuntimeMode(configuredMode)
   const platform = options.platform || process.platform
   const pathext = options.pathext !== undefined ? options.pathext : env.PATHEXT
 
