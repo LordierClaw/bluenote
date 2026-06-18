@@ -1,7 +1,7 @@
 import { spawn as defaultSpawn } from "child_process"
 
 import type { CommandIo } from "../types"
-import { findCommandOnPath } from "../utils/command-discovery"
+import { parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
 import { write } from "../utils/write"
 
@@ -10,7 +10,11 @@ function daemonNotRunning(io: CommandIo): number {
   return 1
 }
 
-function missingClient(io: CommandIo, command: string): number {
+function missingClient(io: CommandIo, command: string, mode: string): number {
+  if (mode === "built") {
+    write(io.stderr || process.stderr, `Built client ${command} was not found in BLUENOTE_BUILT_CLIENT_DIR. Install the BlueNote built client artifact, set BLUENOTE_BUILT_CLIENT_DIR to its directory, or retry with --client-mode path for PATH discovery.\n`)
+    return 1
+  }
   write(io.stderr || process.stderr, `Optional client ${command} was not found on PATH. Install it with npm install -g ${command} and retry.\n`)
   return 1
 }
@@ -20,15 +24,20 @@ export async function runWeb(args: string[] = [], io: CommandIo = {}): Promise<n
   const daemon = await readDaemonStatus(env)
   if (daemon.state !== "running" || !daemon.metadata) return daemonNotRunning(io)
   const metadata = daemon.metadata
+  const parsed = parseClientModeArgs(args, env)
+  if (!parsed.ok) {
+    write(io.stderr || process.stderr, parsed.message)
+    return 1
+  }
 
-  const resolution = findCommandOnPath("bluenote-webui", { path: env.PATH, platform: io.platform || process.platform, pathext: env.PATHEXT })
-  if (!resolution) return missingClient(io, "bluenote-webui")
+  const resolution = resolveClientCommand("bluenote-webui", { env, clientMode: parsed.mode, platform: io.platform || process.platform, pathext: env.PATHEXT })
+  if (!resolution) return missingClient(io, "bluenote-webui", parsed.mode)
 
   const spawn = io.spawn || defaultSpawn
   return await new Promise<number>((resolve) => {
     let child
     try {
-      child = spawn(resolution.path, args, {
+      child = spawn(resolution.path, parsed.args, {
         stdio: ["inherit", "inherit", "inherit"],
         shell: (io.platform || process.platform) === "win32" && /\.(cmd|bat)$/i.test(resolution.path),
         env: {

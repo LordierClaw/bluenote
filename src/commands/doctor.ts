@@ -3,7 +3,7 @@ import os from "os"
 
 import type { CommandIo } from "../types"
 import { getBluenoteStateDir, getDaemonStatePath } from "../daemon/paths"
-import { findCommandOnPath } from "../utils/command-discovery"
+import { parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
 import { readOwnPackageInfo } from "../utils/package-info"
 import { isSupportedNodeVersion, nodeRequirementText } from "../utils/runtime-requirements"
@@ -47,9 +47,15 @@ function checkBun(io: CommandIo): { available: boolean; version?: string } {
   return { available: true, version: String(result.stdout || "").trim() }
 }
 
-export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promise<number> {
+export async function runDoctor(args: string[] = [], io: CommandIo = {}): Promise<number> {
   const stdout = io.stdout || process.stdout
+  const stderr = io.stderr || process.stderr
   const env = io.env || process.env
+  const parsedClientMode = parseClientModeArgs(args, env)
+  if (!parsedClientMode.ok) {
+    write(stderr, parsedClientMode.message)
+    return 1
+  }
   const nodeVersion = io.nodeVersion || process.versions.node
   const platform = io.platform || process.platform
   const supportedNode = isSupportedNodeVersion(nodeVersion)
@@ -72,8 +78,9 @@ export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promi
   write(stdout, `  health: ${daemon.healthOk ? "ok" : daemon.state === "stopped" ? "not checked" : "failed"}\n`)
 
   write(stdout, "\nClients\n")
+  let builtTuiAvailable = false
   for (const client of OPTIONAL_CLIENTS) {
-    const resolution = findCommandOnPath(client, { path: env.PATH, platform, pathext: env.PATHEXT })
+    const resolution = resolveClientCommand(client, { env, clientMode: parsedClientMode.mode, platform, pathext: env.PATHEXT })
     if (!resolution) {
       write(stdout, `  ${client}: missing\n`)
       write(stdout, "    version: unavailable\n")
@@ -90,7 +97,8 @@ export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promi
     const handshake = daemon.state === "running" && daemon.metadata
       ? runClientCheck(resolution.path, ["--check-daemon"], io, platform, clientEnv)
       : undefined
-    const status = version.ok && (!handshake || handshake.ok) ? "found" : "broken"
+    const status = version.ok && (!handshake || handshake.ok) ? resolution.mode : "broken"
+    if (client === "bluenote-term" && resolution.mode === "built" && status === "built") builtTuiAvailable = true
 
     write(stdout, `  ${client}: ${status}\n`)
     write(stdout, `    path: ${resolution.path}\n`)
@@ -98,8 +106,12 @@ export async function runDoctor(_args: string[] = [], io: CommandIo = {}): Promi
     write(stdout, `    daemon handshake: ${handshake ? handshake.ok ? "ok" : "failed" : "not checked"}\n`)
   }
 
-  const bun = checkBun(io)
-  write(stdout, `  Bun for TUI: ${bun.available ? `available${bun.version ? ` (${bun.version})` : ""}` : "not found; install Bun to run bluenote tui"}\n`)
+  if (builtTuiAvailable) {
+    write(stdout, "  Bun for source TUI: not required for built TUI\n")
+  } else {
+    const bun = checkBun(io)
+    write(stdout, `  Bun for source TUI: ${bun.available ? `available${bun.version ? ` (${bun.version})` : ""}` : "not found; install Bun for source/development TUI usage"}\n`)
+  }
 
   write(stdout, "\nConfig\n")
   write(stdout, `  config dir: ${getBluenoteStateDir(env)}\n`)

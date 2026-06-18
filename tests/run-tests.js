@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert').strict;
+const childProcess = require('child_process');
 const EventEmitter = require('events');
 const fs = require('fs');
 const http = require('http');
@@ -8,8 +9,9 @@ const os = require('os');
 const path = require('path');
 
 const cli = require('../dist/cli.js');
-const { findCommandOnPath } = require('../dist/utils/command-discovery.js');
+const { findCommandOnPath, resolveClientCommand } = require('../dist/utils/command-discovery.js');
 const packageJson = require('../package.json');
+const packageLock = require('../package-lock.json');
 
 function createStream() {
   let text = '';
@@ -71,6 +73,85 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function writePackageJson(workspaceRoot, repoName, packageData) {
+  const packageDir = path.join(workspaceRoot, repoName);
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify(packageData, null, 2));
+}
+
+function writeVersionStatusFixture(overrides = {}) {
+  const workspaceRoot = makeTempDir('version-status');
+  const packages = {
+    bluenote: {
+      name: '@lordierclaw/bluenote',
+      version: '0.1.0',
+      dependencies: {
+        '@lordierclaw/bluenote-core': 'git+https://github.com/LordierClaw/bluenote-core.git#0123456789abcdef0123456789abcdef01234567',
+      },
+    },
+    'bluenote-core': { name: '@lordierclaw/bluenote-core', version: '0.1.0' },
+    'bluenote-webui': { name: '@lordierclaw/bluenote-webui', version: '0.1.0' },
+    'bluenote-term': { name: '@lordierclaw/bluenote-term', version: '0.1.0' },
+  };
+
+  for (const [repoName, packageData] of Object.entries(packages)) {
+    const packageRepoName = repoName === 'bluenote-term' ? path.join(repoName, 'packages', 'term') : repoName;
+    writePackageJson(workspaceRoot, packageRepoName, {
+      ...packageData,
+      ...(overrides[repoName] || {}),
+    });
+  }
+
+  return workspaceRoot;
+}
+
+function runVersionStatus(args = [], options = {}) {
+  return childProcess.spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'version-status.mjs'), ...args], {
+    cwd: options.cwd || path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+}
+
+function readScript(relativePath) {
+  const scriptPath = path.join(__dirname, '..', relativePath);
+  assert.ok(fs.existsSync(scriptPath), `missing script ${relativePath}`);
+  return fs.readFileSync(scriptPath, 'utf8');
+}
+
+function runScript(relativePath, args = [], options = {}) {
+  return childProcess.spawnSync(path.join(__dirname, '..', relativePath), args, {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+    env: options.env || process.env,
+  });
+}
+
+function writeFakeNpm(binDir) {
+  writeExecutable(path.join(binDir, 'npm'), [
+    '#!/usr/bin/env bash',
+    'if [ "$1" = "list" ] && [ "$2" = "-g" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_LIST_JSON\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_PREFIX\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "config" ] && [ "$2" = "get" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_CONFIG_GET\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "ping" ]; then',
+    '  if [ -n "$BLUENOTE_TEST_NPM_PING_LOG" ]; then',
+    "    printf '%s\\n' \"$*\" >> \"$BLUENOTE_TEST_NPM_PING_LOG\"",
+    '  fi',
+    '  exit "${BLUENOTE_TEST_NPM_PING_STATUS:-0}"',
+    'fi',
+    'exit 0',
+    '',
+  ].join('\n'));
+}
+
 function httpGet(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const request = http.get(url, { headers }, (response) => {
@@ -103,8 +184,56 @@ async function httpGetJson(url, headers = {}) {
   return { status: response.status, json: JSON.parse(response.body) };
 }
 
+
+function readWorkspaceReadmes(workspaceRoot = path.resolve(__dirname, '..', '..')) {
+  const repoFiles = {
+    bluenote: {
+      readme: path.join(workspaceRoot, 'bluenote', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote', 'package.json'),
+      packageName: '@lordierclaw/bluenote',
+    },
+    'bluenote-core': {
+      readme: path.join(workspaceRoot, 'bluenote-core', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-core', 'package.json'),
+      packageName: '@lordierclaw/bluenote-core',
+    },
+    'bluenote-webui': {
+      readme: path.join(workspaceRoot, 'bluenote-webui', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-webui', 'package.json'),
+      packageName: '@lordierclaw/bluenote-webui',
+    },
+    'bluenote-term': {
+      readme: path.join(workspaceRoot, 'bluenote-term', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-term', 'packages', 'term', 'package.json'),
+      packageName: '@lordierclaw/bluenote-term',
+    },
+  };
+  for (const [repoName, repo] of Object.entries(repoFiles)) {
+    if (!fs.existsSync(repo.readme) || !fs.existsSync(repo.packageJson)) {
+      process.stdout.write(`SKIP README contract: missing sibling checkout for ${repoName}\n`);
+      return undefined;
+    }
+    const parsed = JSON.parse(fs.readFileSync(repo.packageJson, 'utf8'));
+    if (parsed.name !== repo.packageName) {
+      process.stdout.write(`SKIP README contract: ${repoName} package mismatch at ${repo.packageJson}\n`);
+      return undefined;
+    }
+  }
+  return Object.fromEntries(Object.entries(repoFiles).map(([repoName, repo]) => [repoName, fs.readFileSync(repo.readme, 'utf8')]))
+}
+
+function readSiblingReadmes() {
+  return readWorkspaceReadmes();
+}
+
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
+  assert.equal(packageJson.version, '0.1.0');
+  assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
+  assert.equal(packageLock.name, packageJson.name);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[''].name, packageJson.name);
+  assert.equal(packageLock.packages[''].version, packageJson.version);
   assert.equal(packageJson.bin.bluenote, './dist/bin.js');
   assert.equal(packageJson.bin.bn, './dist/bin.js');
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
@@ -113,6 +242,581 @@ async function testPackageMetadata() {
   assert.match(packageJson.dependencies['@lordierclaw/bluenote-core'], /^git\+https:\/\/github\.com\/LordierClaw\/bluenote-core\.git#[0-9a-f]{40}$/);
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
+}
+
+async function testVersionStatusScript() {
+  const workspaceRoot = writeVersionStatusFixture();
+
+  const strictResult = runVersionStatus(['--workspace-root', workspaceRoot]);
+  assert.notEqual(strictResult.status, 0);
+  assert.match(strictResult.stderr, /Git dependency is not allowed in release mode/);
+
+  const result = runVersionStatus(['--workspace-root', workspaceRoot, '--allow-git-deps']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BlueNote package versions/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-core\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-webui\s+0\.1\.0/);
+  assert.match(result.stdout, /@lordierclaw\/bluenote-term\s+0\.1\.0/);
+  assert.equal(result.stderr, '');
+}
+
+async function testVersionStatusScriptFailures() {
+  const badNameRoot = writeVersionStatusFixture({
+    'bluenote-webui': { name: 'bluenote-webui' },
+  });
+  const badName = runVersionStatus(['--workspace-root', badNameRoot, '--allow-git-deps']);
+  assert.notEqual(badName.status, 0);
+  assert.match(badName.stderr, /expected @lordierclaw\/bluenote-webui/);
+
+  const badVersionRoot = writeVersionStatusFixture({
+    'bluenote-term': { version: 'not-semver' },
+  });
+  const badVersion = runVersionStatus(['--workspace-root', badVersionRoot, '--allow-git-deps']);
+  assert.notEqual(badVersion.status, 0);
+  assert.match(badVersion.stderr, /invalid semver version/);
+
+  const leadingZeroRoot = writeVersionStatusFixture({
+    'bluenote-core': { version: '01.2.3' },
+  });
+  const leadingZero = runVersionStatus(['--workspace-root', leadingZeroRoot, '--allow-git-deps']);
+  assert.notEqual(leadingZero.status, 0);
+  assert.match(leadingZero.stderr, /invalid semver version/);
+
+  const emptyPrereleaseRoot = writeVersionStatusFixture({
+    'bluenote': { version: '1.2.3-alpha..1' },
+  });
+  const emptyPrerelease = runVersionStatus(['--workspace-root', emptyPrereleaseRoot, '--allow-git-deps']);
+  assert.notEqual(emptyPrerelease.status, 0);
+  assert.match(emptyPrerelease.stderr, /invalid semver version/);
+
+  const missingRoot = writeVersionStatusFixture();
+  fs.rmSync(path.join(missingRoot, 'bluenote-core'), { recursive: true, force: true });
+  const missingPackage = runVersionStatus(['--workspace-root', missingRoot, '--allow-git-deps']);
+  assert.notEqual(missingPackage.status, 0);
+  assert.match(missingPackage.stderr, /missing package/);
+}
+
+async function testReadmeStructureContract() {
+  const readmes = readSiblingReadmes();
+  if (!readmes) return;
+
+  const requiredHeadings = [
+    '## Role in BlueNote',
+    '## Install',
+    '## Local development',
+    '## Scripts',
+    '## Packaging and versions',
+    '## Cross-platform notes',
+    '## Related packages',
+  ];
+
+  for (const [repoName, readme] of Object.entries(readmes)) {
+    let previousIndex = -1;
+    for (const heading of requiredHeadings) {
+      const index = readme.indexOf(heading);
+      assert.notEqual(index, -1, `${repoName} README missing ${heading}`);
+      assert.ok(index > previousIndex, `${repoName} README has ${heading} out of order`);
+      previousIndex = index;
+    }
+
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-(?:webui|term)\b/, `${repoName} README uses an old unscoped client package install example`);
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-core\b/, `${repoName} README uses an old unscoped core package install example`);
+    assert.doesNotMatch(readme, /npm install(?: -g)? bluenote\b/, `${repoName} README uses an old unscoped distribution package install example`);
+  }
+
+  assert.match(readmes.bluenote, /development mode may use pinned Git deps/i, 'bluenote README should explain that development mode may use pinned Git dependencies');
+  assert.match(readmes.bluenote, /release mode must use published version deps/i, 'bluenote README should explain that release mode requires published version dependencies');
+  assert.match(readmes.bluenote, /npm run version:status\s+is the release check/i, 'bluenote README should call out npm run version:status as the release check');
+  assert.doesNotMatch(readmes.bluenote, /release-like dependency modes, prefer published npm versions or immutable Git tags\/commits/i, 'bluenote README should not describe Git dependencies as acceptable in release mode');
+}
+
+async function testDevLocalScriptsContract() {
+  const installSh = readScript('scripts/dev-install-local.sh');
+  const uninstallSh = readScript('scripts/dev-uninstall-local.sh');
+  const installPs = readScript('scripts/dev-install-local.ps1');
+  const uninstallPs = readScript('scripts/dev-uninstall-local.ps1');
+
+  assert.match(installSh, /set -euo pipefail/);
+  assert.match(uninstallSh, /set -euo pipefail/);
+  for (const [name, script] of Object.entries({ installPs, uninstallPs })) {
+    assert.match(script, /param\s*\(/i, `${name} should define param(...)`);
+    assert.match(script, /\[switch\]\s*\$DryRun/i, `${name} should support -DryRun`);
+    assert.match(script, /\$LASTEXITCODE/, `${name} should fail on native command non-zero exits`);
+  }
+
+  const installDryRun = runScript('scripts/dev-install-local.sh', ['--all', '--dry-run']);
+  assert.equal(installDryRun.status, 0, installDryRun.stderr);
+  assert.match(installDryRun.stdout, /cd .*bluenote(?:\s|$)/);
+  assert.match(installDryRun.stdout, /npm (?:run check|link)/);
+  assert.match(installDryRun.stdout, /cd .*bluenote-webui(?:\s|$)/);
+  assert.match(installDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$)/);
+  assert.match(installDryRun.stdout, /bun link/);
+
+  const uninstallDryRun = runScript('scripts/dev-uninstall-local.sh', ['--all', '--dry-run']);
+  assert.equal(uninstallDryRun.status, 0, uninstallDryRun.stderr);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote(?:\s|$).*npm run check/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-webui(?:\s|$).*npm run check/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-term(?:\s|$).*bun run check/);
+  const stopIndex = uninstallDryRun.stdout.indexOf('bluenote daemon stop');
+  const unlinkIndex = uninstallDryRun.stdout.search(/npm unlink|bun unlink/);
+  assert.notEqual(stopIndex, -1, 'uninstall dry-run should stop daemon');
+  assert.notEqual(unlinkIndex, -1, 'uninstall dry-run should unlink packages');
+  assert.ok(stopIndex < unlinkIndex, 'uninstall should stop daemon before unlink attempts');
+  assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote/);
+  assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote-webui/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$).*bun unlink(?:\s|$)/);
+  assert.doesNotMatch(uninstallDryRun.stdout, /bun unlink @lordierclaw\/bluenote-term/);
+}
+
+async function testInstallerPreflightContract() {
+  const installSh = readScript('scripts/install.sh');
+  const uninstallSh = readScript('scripts/uninstall.sh');
+  const installPs = readScript('scripts/install.ps1');
+  const uninstallPs = readScript('scripts/uninstall.ps1');
+  const combined = [installSh, uninstallSh, installPs, uninstallPs].join('\n');
+
+  assert.match(installSh, /set -Eeuo pipefail/);
+  assert.match(uninstallSh, /set -Eeuo pipefail/);
+  for (const [name, script] of Object.entries({ installPs, uninstallPs })) {
+    assert.match(script, /param\s*\(/i, `${name} should define param(...)`);
+    assert.match(script, /\[switch\]\s*\$DryRun/i, `${name} should support dry-run`);
+    assert.match(script, /ExecutionPolicy|PSSecurityException/i, `${name} should mention PowerShell execution policy guidance`);
+    assert.match(script, /\[Console\]::Error\.WriteLine/, `${name} should print recovery errors without terminating before rollback`);
+  }
+
+  for (const phrase of [
+    'old package', 'unscoped', 'older scoped package', 'newer installed version', 'mixed install',
+    'stale daemon', 'partial previous install', 'unknown files', 'npm global prefix',
+    'GitHub Packages', 'unsupported OS/architecture/platform', 'missing required runtime',
+    'before mutating state', 'best-effort rollback', 'Recovery command', 'preserve user notes/config/data',
+    'delete my bluenote data'
+  ]) {
+    assert.match(combined, new RegExp(escapeRegExp(phrase), 'i'), `installer contract missing ${phrase}`);
+  }
+  assert.match(combined, /upgrade|repair|skip|abort/i, 'interactive conflict choices should be explicit');
+  assert.match(combined, /fail instead of overwriting|fail.*unknown|abort.*conflict/i, 'non-interactive mode should fail on unknown conflicts');
+  assert.match(combined, /built terminal artifact|built TUI|built-binary mode/i, 'TUI path should use built artifacts, not Bun source installs');
+  assert.doesNotMatch(installSh, /bun install|curl.*bun|install bun/i, 'user installer must not auto-install Bun');
+
+  const installDryRun = runScript('scripts/install.sh', ['--dry-run']);
+  assert.equal(installDryRun.status, 0, installDryRun.stderr);
+  assert.match(installDryRun.stdout, /Install mode: interactive/i);
+  assert.match(installDryRun.stdout, /Default selected clients: @lordierclaw\/bluenote only/i);
+  assert.match(installDryRun.stdout, /\[x\] @lordierclaw\/bluenote\b/i);
+  assert.match(installDryRun.stdout, /\[ \] @lordierclaw\/bluenote-webui/i);
+  assert.match(installDryRun.stdout, /\[ \] @lordierclaw\/bluenote-term built terminal artifact/i);
+  assert.match(installDryRun.stdout, /all clients/i);
+  assert.match(installDryRun.stdout, /npmjs.*default/i);
+  assert.match(installDryRun.stdout, /GitHub Packages/i);
+  assert.match(installDryRun.stdout, /run after install: bluenote doctor/i);
+  assert.match(installDryRun.stdout, /preserve user notes\/config\/data/i);
+  assert.doesNotMatch(installDryRun.stdout, /@lordierclaw:registry=https:\/\/npm\.pkg\.github\.com/);
+
+  const installYesDryRun = runScript('scripts/install.sh', ['--yes', '--dry-run']);
+  assert.equal(installYesDryRun.status, 0, installYesDryRun.stderr);
+  assert.match(installYesDryRun.stdout, /Install mode: non-interactive/i);
+  assert.match(installYesDryRun.stdout, /non-interactive safe defaults/i);
+  assert.match(installYesDryRun.stdout, /install package: @lordierclaw\/bluenote@latest/);
+  assert.doesNotMatch(installYesDryRun.stdout, /optional package: @lordierclaw\/bluenote-webui/);
+  assert.doesNotMatch(installYesDryRun.stdout, /optional package: @lordierclaw\/bluenote-term built terminal artifact/);
+
+  const webDryRun = runScript('scripts/install.sh', ['--with-web', '--dry-run']);
+  assert.equal(webDryRun.status, 0, webDryRun.stderr);
+  assert.match(webDryRun.stdout, /optional package: @lordierclaw\/bluenote-webui@latest/);
+
+  const tuiDryRun = runScript('scripts/install.sh', ['--with-tui', '--dry-run']);
+  assert.equal(tuiDryRun.status, 0, tuiDryRun.stderr);
+  assert.match(tuiDryRun.stdout, /optional built terminal artifact: copy BLUENOTE_TERM_ARTIFACT_PATH/);
+  assert.match(tuiDryRun.stdout, /does not require Bun at runtime/i);
+  assert.match(tuiDryRun.stdout, /BLUENOTE_CLIENT_MODE=built/);
+  assert.match(tuiDryRun.stdout, /BLUENOTE_BUILT_CLIENT_DIR/);
+  assert.match(tuiDryRun.stdout, /client-mode record/i);
+  assert.match(tuiDryRun.stdout, /managed built client executable/i);
+  assert.doesNotMatch(tuiDryRun.stdout, /bun install|fallback to Bun/i);
+
+  const builtModeWithoutTui = runScript('scripts/install.sh', ['--client-mode', 'built', '--dry-run']);
+  assert.notEqual(builtModeWithoutTui.status, 0);
+  assert.match(builtModeWithoutTui.stderr, /--client-mode built requires --with-tui/i);
+
+  assert.match(installSh, /managed built client executable/);
+  assert.match(installSh, /BLUENOTE_TERM_ARTIFACT_PATH/);
+  assert.doesNotMatch(installSh, /exec bluenote-term/);
+  assert.match(installPs, /Copy-Item -LiteralPath \$env:BLUENOTE_TERM_ARTIFACT_PATH -Destination \$shimPath -Force/);
+  assert.match(installPs, /Set-Content -LiteralPath \$recordPath/);
+  assert.match(installPs, /bluenote-term\.exe/);
+  assert.match(installPs, /BLUENOTE_CLIENT_MODE=built/);
+
+  const allDryRun = runScript('scripts/install.sh', ['--all', '--dry-run']);
+  assert.equal(allDryRun.status, 0, allDryRun.stderr);
+  assert.match(allDryRun.stdout, /@lordierclaw\/bluenote-webui/);
+  assert.match(allDryRun.stdout, /optional built terminal artifact: copy BLUENOTE_TERM_ARTIFACT_PATH/);
+
+  const githubDryRun = runScript('scripts/install.sh', ['--registry', 'github', '--dry-run']);
+  assert.equal(githubDryRun.status, 0, githubDryRun.stderr);
+  assert.match(githubDryRun.stdout, /@lordierclaw:registry=https:\/\/npm\.pkg\.github\.com/);
+  assert.match(githubDryRun.stdout, /NODE_AUTH_TOKEN|GH_TOKEN/);
+
+  const preflightBin = makeTempDir('installer-preflight-bin');
+  const preflightPrefix = makeTempDir('installer-preflight-prefix');
+  writeFakeNpm(preflightBin);
+
+  const oldPackageRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { bluenote: { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(oldPackageRun.status, 0);
+  assert.match(oldPackageRun.stderr + oldPackageRun.stdout, /old\/unscoped package installed: bluenote@0\.0\.5/i);
+
+  const olderScopedRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(olderScopedRun.status, 0);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+
+  const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote-term': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(olderScopedTermRun.status, 0);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+
+  const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote-term': { version: '0.0.5' } } }),
+    },
+  });
+  assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+
+  const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
+  const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
+    cwd: outOfRepoCwd,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(outOfRepoVersionRun.status, 0);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+
+  const partialConfigHome = makeTempDir('installer-partial-config-home');
+  fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });
+  fs.writeFileSync(path.join(partialConfigHome, 'bluenote', 'client-mode.env'), 'BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=/missing\n');
+  const partialRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_CONFIG_HOME: partialConfigHome,
+    },
+  });
+  assert.notEqual(partialRun.status, 0);
+  assert.match(partialRun.stderr + partialRun.stdout, /partial previous install detected: client-mode record exists without built client executable/i);
+
+  const recordedBuiltConfigHome = makeTempDir('installer-recorded-built-config-home');
+  const preflightRecordedBuiltDir = path.join(makeTempDir('installer-recorded-built-dir'), 'clients');
+  fs.mkdirSync(path.join(recordedBuiltConfigHome, 'bluenote'), { recursive: true });
+  fs.mkdirSync(preflightRecordedBuiltDir, { recursive: true });
+  fs.writeFileSync(path.join(preflightRecordedBuiltDir, 'bluenote-term'), 'existing built client\n');
+  fs.writeFileSync(path.join(recordedBuiltConfigHome, 'bluenote', 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${preflightRecordedBuiltDir}\n`);
+  const recordedBuiltRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_CONFIG_HOME: recordedBuiltConfigHome,
+    },
+  });
+  assert.equal(recordedBuiltRun.status, 0, recordedBuiltRun.stderr);
+  assert.doesNotMatch(recordedBuiltRun.stderr + recordedBuiltRun.stdout, /partial previous install detected/i);
+
+  const githubAuthRun = runScript('scripts/install.sh', ['--yes', '--registry', 'github', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_TEST_NPM_CONFIG_GET: 'undefined',
+      NODE_AUTH_TOKEN: '',
+      GH_TOKEN: '',
+    },
+  });
+  assert.notEqual(githubAuthRun.status, 0);
+  assert.match(githubAuthRun.stderr + githubAuthRun.stdout, /GitHub Packages auth missing/i);
+
+  const githubPingLog = path.join(makeTempDir('installer-github-ping-log'), 'npm-ping.log');
+  const githubReachableRun = runScript('scripts/install.sh', ['--yes', '--registry', 'github', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_TEST_NPM_CONFIG_GET: 'token-present',
+      BLUENOTE_TEST_NPM_PING_LOG: githubPingLog,
+    },
+  });
+  assert.equal(githubReachableRun.status, 0, githubReachableRun.stderr);
+  assert.match(fs.readFileSync(githubPingLog, 'utf8'), /ping --registry https:\/\/npm\.pkg\.github\.com/);
+
+  const prefixFailureRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: path.join(makeTempDir('installer-missing-prefix'), 'does-not-exist'),
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+    },
+  });
+  assert.notEqual(prefixFailureRun.status, 0);
+  assert.match(prefixFailureRun.stderr + prefixFailureRun.stdout, /npm global prefix not writable or missing/i);
+
+  const conflictBin = makeTempDir('installer-conflict-bin');
+  writeExecutable(path.join(conflictBin, 'bluenote'));
+  const conflictInteractive = runScript('scripts/install.sh', ['--dry-run'], { env: { ...process.env, PATH: `${conflictBin}${path.delimiter}${process.env.PATH || ''}` } });
+  assert.equal(conflictInteractive.status, 0, conflictInteractive.stderr);
+  assert.match(conflictInteractive.stdout, /Conflict found/i);
+  assert.match(conflictInteractive.stdout, /safe choices: upgrade, repair, skip, abort/i);
+  const conflictRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, PATH: `${conflictBin}${path.delimiter}${process.env.PATH || ''}` } });
+  assert.notEqual(conflictRun.status, 0);
+  assert.match(conflictRun.stderr + conflictRun.stdout, /non-interactive conflict failure/i);
+
+  const unknownArtifactDir = makeTempDir('installer-unknown-artifact');
+  fs.writeFileSync(path.join(unknownArtifactDir, 'mystery-file'), 'do not overwrite');
+  const artifactConflict = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], { env: { ...process.env, BLUENOTE_BUILT_CLIENT_DIR: unknownArtifactDir } });
+  assert.notEqual(artifactConflict.status, 0);
+  assert.match(artifactConflict.stderr + artifactConflict.stdout, /unknown files/i);
+  assert.match(artifactConflict.stderr + artifactConflict.stdout, /non-interactive conflict failure/i);
+
+  const managedHome = makeTempDir('installer-default-built-home');
+  const managedBuiltDir = path.join(managedHome, '.local', 'share', 'bluenote', 'clients');
+  fs.mkdirSync(managedBuiltDir, { recursive: true });
+  fs.writeFileSync(path.join(managedBuiltDir, 'mystery-file'), 'do not overwrite');
+  const defaultCliOnly = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, HOME: managedHome } });
+  assert.equal(defaultCliOnly.status, 0, defaultCliOnly.stderr);
+  const defaultArtifactConflict = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], { env: { ...process.env, HOME: managedHome } });
+  assert.notEqual(defaultArtifactConflict.status, 0);
+  assert.match(defaultArtifactConflict.stderr + defaultArtifactConflict.stdout, /unknown files in built artifact install directory/i);
+  assert.match(defaultArtifactConflict.stderr + defaultArtifactConflict.stdout, new RegExp(escapeRegExp(managedBuiltDir)));
+
+  const fakeUnameBin = makeTempDir('installer-fake-uname-bin');
+  writeExecutable(path.join(fakeUnameBin, 'uname'), '#!/usr/bin/env bash\nif [ "$1" = "-s" ]; then\n  printf "FreeBSD\\n"\nelif [ "$1" = "-m" ]; then\n  printf "x86_64\\n"\nelse\n  printf "FreeBSD x86_64\\n"\nfi\n');
+  const unsupportedTuiDryRun = runScript('scripts/install.sh', ['--with-tui', '--dry-run'], { env: { ...process.env, PATH: `${fakeUnameBin}${path.delimiter}${process.env.PATH || ''}` } });
+  assert.notEqual(unsupportedTuiDryRun.status, 0);
+  assert.match(unsupportedTuiDryRun.stderr + unsupportedTuiDryRun.stdout, /unsupported OS\/architecture\/platform.*cannot install built terminal artifact/i);
+  assert.doesNotMatch(unsupportedTuiDryRun.stdout, /optional built terminal artifact: copy BLUENOTE_TERM_ARTIFACT_PATH/);
+  assert.doesNotMatch(unsupportedTuiDryRun.stdout, /BLUENOTE_CLIENT_MODE=built/);
+
+  const nonInteractiveDefault = runScript('scripts/install.sh', []);
+  assert.notEqual(nonInteractiveDefault.status, 0);
+  assert.match(nonInteractiveDefault.stderr, /default install is interactive; use --yes/i);
+
+  const rollbackHome = makeTempDir('installer-rollback-home');
+  const rollbackBuiltDir = path.join(rollbackHome, '.local', 'share', 'bluenote', 'clients');
+  const rollbackConfigHome = path.join(rollbackHome, 'config-home');
+  const rollbackConfigDir = path.join(rollbackConfigHome, 'bluenote');
+  const rollbackBin = makeTempDir('installer-rollback-bin');
+  const rollbackInstalledBin = makeTempDir('installer-rollback-installed-bin');
+  const rollbackArtifact = path.join(makeTempDir('installer-artifact'), 'bluenote-term');
+  const rollbackNpmLog = path.join(makeTempDir('installer-rollback-npm-log'), 'npm.log');
+  fs.mkdirSync(rollbackBuiltDir, { recursive: true });
+  fs.mkdirSync(rollbackConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(rollbackBuiltDir, 'bluenote-term'), 'old built client\n');
+  fs.writeFileSync(path.join(rollbackConfigDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${rollbackBuiltDir}\n`);
+  writeExecutable(path.join(rollbackBin, 'node'), '#!/usr/bin/env bash\nexit 0\n');
+  writeExecutable(path.join(rollbackBin, 'npm'), `#!/usr/bin/env bash
+printf '%s\n' "$*" >> ${JSON.stringify(rollbackNpmLog)}
+if [ "$1" = "list" ] && [ "$2" = "-g" ]; then
+  printf '{"dependencies":{}}\n'
+  exit 0
+fi
+if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+  printf '%s\n' ${JSON.stringify(rollbackInstalledBin)}
+  exit 0
+fi
+if [ "$1" = "config" ] && [ "$2" = "get" ]; then
+  printf 'undefined\n'
+  exit 0
+fi
+if [ "$1" = "install" ]; then
+  cat > ${JSON.stringify(path.join(rollbackInstalledBin, 'bluenote'))} <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "doctor" ]; then
+  echo "doctor failed" >&2
+  exit 1
+fi
+exit 0
+EOF
+  chmod 755 ${JSON.stringify(path.join(rollbackInstalledBin, 'bluenote'))}
+fi
+exit 0
+`);
+  writeExecutable(rollbackArtifact, '#!/usr/bin/env bash\necho new built client\n');
+  const rollbackRun = runScript('scripts/install.sh', ['--yes', '--with-tui'], {
+    env: {
+      ...process.env,
+      HOME: rollbackHome,
+      BLUENOTE_CONFIG_HOME: rollbackConfigHome,
+      BLUENOTE_TERM_ARTIFACT_PATH: rollbackArtifact,
+      PATH: `${rollbackBin}${path.delimiter}${rollbackInstalledBin}${path.delimiter}${process.env.PATH || ''}`,
+    },
+  });
+  assert.notEqual(rollbackRun.status, 0);
+  assert.match(fs.readFileSync(rollbackNpmLog, 'utf8'), /uninstall -g @lordierclaw\/bluenote/);
+  assert.match(rollbackRun.stderr + rollbackRun.stdout, /restore artifact:/i);
+  assert.equal(fs.readFileSync(path.join(rollbackBuiltDir, 'bluenote-term'), 'utf8'), 'old built client\n');
+  assert.equal(fs.readFileSync(path.join(rollbackConfigDir, 'client-mode.env'), 'utf8'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${rollbackBuiltDir}\n`);
+
+  const failRun = runScript('scripts/install.sh', ['--yes', '--simulate-failure-for-tests']);
+  assert.notEqual(failRun.status, 0);
+  assert.match(failRun.stderr + failRun.stdout, /Recovery command/);
+  assert.match(failRun.stderr + failRun.stdout, /best-effort rollback/i);
+
+  const uninstallDryRun = runScript('scripts/uninstall.sh', ['--dry-run']);
+  assert.equal(uninstallDryRun.status, 0, uninstallDryRun.stderr);
+  const stopIndex = uninstallDryRun.stdout.indexOf('bluenote daemon stop');
+  const uninstallIndex = uninstallDryRun.stdout.indexOf('npm uninstall -g @lordierclaw/bluenote');
+  assert.notEqual(stopIndex, -1, 'uninstall dry-run should stop daemon first');
+  assert.notEqual(uninstallIndex, -1, 'uninstall dry-run should uninstall packages');
+  assert.ok(stopIndex < uninstallIndex, 'uninstall should stop daemon before package removal');
+  assert.match(uninstallDryRun.stdout, /@lordierclaw\/bluenote-webui/);
+  assert.match(uninstallDryRun.stdout, /optionally remove managed @lordierclaw\/bluenote-term built terminal artifact/i);
+  assert.match(uninstallDryRun.stdout, /remove managed built client executable/i);
+  assert.match(uninstallDryRun.stdout, /preserve user notes\/config\/data/i);
+  assert.doesNotMatch(uninstallDryRun.stdout, /rm -rf .*BLUENOTE_DATA_HOME/);
+
+  const uninstallConfigHome = makeTempDir('uninstall-client-mode-config');
+  const uninstallConfigDir = path.join(uninstallConfigHome, 'bluenote');
+  const recordedBuiltDir = path.join(makeTempDir('uninstall-built-dir'), 'clients');
+  fs.mkdirSync(uninstallConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(uninstallConfigDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${recordedBuiltDir}\n`);
+  const recordedUninstallDryRun = runScript('scripts/uninstall.sh', ['--dry-run'], { env: { ...process.env, BLUENOTE_CONFIG_HOME: uninstallConfigHome } });
+  assert.equal(recordedUninstallDryRun.status, 0, recordedUninstallDryRun.stderr);
+  assert.match(recordedUninstallDryRun.stdout, new RegExp(escapeRegExp(path.join(recordedBuiltDir, 'bluenote-term'))));
+
+  const xdgConfigHome = makeTempDir('uninstall-xdg-config-home');
+  const xdgConfigDir = path.join(xdgConfigHome, 'bluenote');
+  fs.mkdirSync(xdgConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(xdgConfigDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${recordedBuiltDir}\n`);
+  const xdgPurgeDryRun = runScript('scripts/uninstall.sh', ['--purge-config', '--dry-run'], { env: { ...process.env, XDG_CONFIG_HOME: xdgConfigHome } });
+  assert.equal(xdgPurgeDryRun.status, 0, xdgPurgeDryRun.stderr);
+  assert.match(xdgPurgeDryRun.stdout, new RegExp(escapeRegExp(path.join(xdgConfigHome, 'bluenote'))));
+
+  const purgeWithoutPhrase = runScript('scripts/uninstall.sh', ['--purge-data', '--dry-run']);
+  assert.notEqual(purgeWithoutPhrase.status, 0);
+  assert.match(purgeWithoutPhrase.stderr, /requires exact confirmation: delete my bluenote data/);
+  const purgeWrongPhrase = runScript('scripts/uninstall.sh', ['--purge-data', '--confirm', 'Delete my bluenote data', '--dry-run']);
+  assert.notEqual(purgeWrongPhrase.status, 0);
+  assert.match(purgeWrongPhrase.stderr, /requires exact confirmation: delete my bluenote data/);
+  const purgeConfirmed = runScript('scripts/uninstall.sh', ['--purge-data', '--confirm', 'delete my bluenote data', '--dry-run']);
+  assert.equal(purgeConfirmed.status, 0, purgeConfirmed.stderr);
+  assert.match(purgeConfirmed.stdout, /Purge-data confirmed by exact typed phrase/);
+
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.match(readme, /\.\/scripts\/install\.sh --dry-run/);
+  assert.match(readme, /\.\/scripts\/install\.sh --yes/);
+  assert.match(readme, /\.\\scripts\\install\.ps1 -Interactive/);
+  assert.match(readme, /\.\/scripts\/uninstall\.sh --dry-run/);
+  assert.match(readme, /\.\\scripts\\uninstall\.ps1 -DryRun/);
+  assert.doesNotMatch(readme, /Task 10 .*contract categories/i);
+}
+
+async function testDevVerifyLocalScriptsContract() {
+  const verifySh = readScript('scripts/dev-verify-local.sh');
+  const verifyPs = readScript('scripts/dev-verify-local.ps1');
+
+  assert.match(verifySh, /set -euo pipefail/);
+  assert.match(verifySh, /--dry-run/);
+  assert.match(verifySh, /--keep-temp/);
+  assert.match(verifySh, /NPM_CONFIG_PREFIX|npm_prefix/);
+  assert.match(verifySh, /NPM_CONFIG_CACHE|npm_cache/);
+  assert.match(verifySh, /NPM_CONFIG_USERCONFIG|npm_config_file/);
+  assert.match(verifySh, /BLUENOTE_CONFIG_HOME/);
+  assert.match(verifySh, /BLUENOTE_DATA_HOME/);
+  assert.match(verifySh, /BLUENOTE_CACHE_HOME/);
+  assert.match(verifySh, /npm pack/);
+  assert.match(verifySh, /npm install -g/);
+  assert.ok(verifySh.indexOf('npm pack') < verifySh.indexOf('npm install -g'), 'shell verification should pack before install');
+  assert.match(verifySh, /bluenote --help/);
+  assert.match(verifySh, /bluenote version/);
+  assert.match(verifySh, /bluenote doctor/);
+  assert.match(verifySh, /bluenote daemon start/);
+  assert.match(verifySh, /bluenote daemon status/);
+  assert.match(verifySh, /bluenote daemon stop/);
+  assert.match(verifySh, /daemon_started/);
+  assert.match(verifySh, /trap .*cleanup/);
+  assert.match(verifySh, /keep_temp/);
+  assert.match(verifySh, /rm -rf/);
+
+  assert.match(verifyPs, /param\s*\(/i);
+  assert.match(verifyPs, /\[switch\]\s*\$DryRun/i);
+  assert.match(verifyPs, /\[switch\]\s*\$KeepTemp/i);
+  assert.match(verifyPs, /NPM_CONFIG_PREFIX|npmPrefix/);
+  assert.match(verifyPs, /NPM_CONFIG_CACHE|npmCache/);
+  assert.match(verifyPs, /NPM_CONFIG_USERCONFIG|npmUserConfig/);
+  assert.match(verifyPs, /BLUENOTE_CONFIG_HOME/);
+  assert.match(verifyPs, /BLUENOTE_DATA_HOME/);
+  assert.match(verifyPs, /BLUENOTE_CACHE_HOME/);
+  assert.match(verifyPs, /npm pack/);
+  assert.match(verifyPs, /npm install -g/);
+  assert.ok(verifyPs.indexOf('npm pack') < verifyPs.indexOf('npm install -g'), 'PowerShell verification should pack before install');
+  assert.match(verifyPs, /bluenote --help/);
+  assert.match(verifyPs, /bluenote version/);
+  assert.match(verifyPs, /bluenote doctor/);
+  assert.match(verifyPs, /bluenote daemon start/);
+  assert.match(verifyPs, /bluenote daemon status/);
+  assert.match(verifyPs, /bluenote daemon stop/);
+  assert.match(verifyPs, /daemonStarted/);
+  assert.match(verifyPs, /bluenote-core/);
+  assert.match(verifyPs, /@lordierclaw\/bluenote-core/);
+  assert.match(verifyPs, /finally/);
+  assert.match(verifyPs, /Remove-Item/);
+
+  const verifyDryRun = runScript('scripts/dev-verify-local.sh', ['--web', '--dry-run']);
+  assert.equal(verifyDryRun.status, 0, verifyDryRun.stderr);
+  assert.match(verifyDryRun.stdout, /npm pack/);
+  assert.match(verifyDryRun.stdout, /npm install -g/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_PREFIX=/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_CACHE=/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_USERCONFIG=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_CONFIG_HOME=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_DATA_HOME=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_CACHE_HOME=/);
+  assert.match(verifyDryRun.stdout, /bluenote --help/);
+  assert.match(verifyDryRun.stdout, /bluenote version/);
+  assert.match(verifyDryRun.stdout, /bluenote doctor/);
+  const startIndex = verifyDryRun.stdout.indexOf('bluenote daemon start');
+  const statusIndex = verifyDryRun.stdout.indexOf('bluenote daemon status');
+  const stopIndex = verifyDryRun.stdout.indexOf('bluenote daemon stop');
+  assert.notEqual(startIndex, -1, 'dry-run should start daemon');
+  assert.notEqual(statusIndex, -1, 'dry-run should check daemon status');
+  assert.notEqual(stopIndex, -1, 'dry-run should stop daemon');
+  assert.ok(startIndex < statusIndex && statusIndex < stopIndex, 'daemon flow should be start/status/stop');
+  assert.match(verifyDryRun.stdout, /cleanup temp paths/);
+
+  const keepTempDryRun = runScript('scripts/dev-verify-local.sh', ['--web', '--dry-run', '--keep-temp']);
+  assert.equal(keepTempDryRun.status, 0, keepTempDryRun.stderr);
+  assert.match(keepTempDryRun.stdout, /keeping temp paths/);
 }
 
 async function testHelpDoesNotLoadClients() {
@@ -134,7 +838,7 @@ async function testVersionDoesNotLoadClients() {
     },
   });
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /@lordierclaw\/bluenote 0\.0\.0/);
+  assert.match(result.stdout, new RegExp(`${escapeRegExp(packageJson.name)} ${escapeRegExp(packageJson.version)}`));
   assert.match(result.stdout, /@lordierclaw\/bluenote-core/);
   assert.doesNotMatch(result.stdout, /bluenote-term/);
   assert.doesNotMatch(result.stdout, /bluenote-webui/);
@@ -160,7 +864,7 @@ async function testDoctorDoesNotLoadClients() {
   assert.match(result.stdout, /Distribution/);
   assert.match(result.stdout, /Clients/);
   assert.match(result.stdout, /Config/);
-  assert.match(result.stdout, /Bun for TUI: available/);
+  assert.match(result.stdout, /Bun for source TUI: available/);
 }
 
 async function testCommandDiscovery() {
@@ -193,6 +897,68 @@ async function testCommandDiscovery() {
   assert.equal(findCommandOnPath('node', { path: tempBin, platform: 'linux' }), undefined);
 }
 
+async function testClientRuntimeModeResolution() {
+  const pathBin = makeTempDir('runtime-path-bin');
+  const builtDir = makeTempDir('runtime-built-dir');
+  const pathTerm = path.join(pathBin, 'bluenote-term');
+  const builtTerm = path.join(builtDir, 'bluenote-term');
+  writeExecutable(pathTerm);
+  writeExecutable(builtTerm);
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: pathBin },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: pathTerm, mode: 'path' });
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: builtTerm, mode: 'built' });
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    clientMode: 'path',
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: pathTerm, mode: 'path' });
+
+  const configHome = makeTempDir('runtime-config-home');
+  const configDir = path.join(configHome, 'bluenote');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${builtDir}\n`);
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: '', BLUENOTE_CONFIG_HOME: configHome },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: builtTerm, mode: 'built' });
+
+  const xdgHome = makeTempDir('runtime-xdg-config-home');
+  fs.mkdirSync(path.join(xdgHome, 'bluenote'), { recursive: true });
+  fs.writeFileSync(path.join(xdgHome, 'bluenote', 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${builtDir}\n`);
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: '', XDG_CONFIG_HOME: xdgHome },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: builtTerm, mode: 'built' });
+
+  const appDataHome = makeTempDir('runtime-appdata-home');
+  fs.mkdirSync(path.join(appDataHome, 'bluenote'), { recursive: true });
+  fs.writeFileSync(path.join(appDataHome, 'bluenote', 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${builtDir}\n`);
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: '', APPDATA: appDataHome },
+    platform: 'win32',
+  }), { command: 'bluenote-term', path: builtTerm, mode: 'built' });
+
+  assert.equal(resolveClientCommand('bluenote-term', {
+    clientMode: 'path',
+    env: { PATH: '', BLUENOTE_CONFIG_HOME: configHome },
+    platform: 'linux',
+  }), undefined);
+
+  assert.equal(resolveClientCommand('bluenote-term', {
+    clientMode: 'built',
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: path.join(builtDir, 'missing') },
+    platform: 'linux',
+  }), undefined);
+}
+
 async function testDoctorReportsOptionalClients() {
   const noClients = await runCli(['doctor'], {
     nodeVersion: '18.19.0',
@@ -203,7 +969,7 @@ async function testDoctorReportsOptionalClients() {
   assert.equal(noClients.code, 0);
   assert.match(noClients.stdout, /bluenote-webui: missing/);
   assert.match(noClients.stdout, /bluenote-term: missing/);
-  assert.match(noClients.stdout, /Bun for TUI: not found/);
+  assert.match(noClients.stdout, /Bun for source TUI: not found/);
   assert.doesNotMatch(noClients.stdout, /do-not-print-this|BLUENOTE_DAEMON_TOKEN/);
 
   const tempBin = makeTempDir('doctor-clients');
@@ -218,11 +984,88 @@ async function testDoctorReportsOptionalClients() {
     spawnSync: () => ({ status: 0, stdout: '1.3.14\n' }),
   });
   assert.equal(found.code, 0);
-  assert.match(found.stdout, /bluenote-webui: found/);
+  assert.match(found.stdout, /bluenote-webui: path/);
   assert.match(found.stdout, new RegExp(escapeRegExp(webPath)));
   assert.match(found.stdout, /version: 1\.3\.14/);
-  assert.match(found.stdout, /bluenote-term: found/);
+  assert.match(found.stdout, /bluenote-term: path/);
   assert.match(found.stdout, new RegExp(escapeRegExp(termPath)));
+}
+
+async function testDoctorReportsClientRuntimeModes() {
+  const tempBin = makeTempDir('doctor-mode-path');
+  const builtDir = makeTempDir('doctor-mode-built');
+  const pathTerm = path.join(tempBin, 'bluenote-term');
+  const builtTerm = path.join(builtDir, 'bluenote-term');
+  writeExecutable(pathTerm);
+  writeExecutable(builtTerm);
+
+  const built = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync(command) {
+      assert.notEqual(command, 'bun', 'doctor should not require Bun when built TUI is available');
+      return { status: 0, stdout: '2.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(built.code, 0);
+  assert.match(built.stdout, /bluenote-term: built/);
+  assert.match(built.stdout, new RegExp(escapeRegExp(builtTerm)));
+  assert.match(built.stdout, /Bun for source TUI: not required for built TUI/);
+
+  const pathMode = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir, BLUENOTE_CLIENT_MODE: 'path' },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '1.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(pathMode.code, 0);
+  assert.match(pathMode.stdout, /bluenote-term: path/);
+  assert.match(pathMode.stdout, new RegExp(escapeRegExp(pathTerm)));
+
+  const pathFlag = await runCli(['doctor', '--client-mode', 'path'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '1.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(pathFlag.code, 0);
+  assert.match(pathFlag.stdout, /bluenote-term: path/);
+  assert.match(pathFlag.stdout, new RegExp(escapeRegExp(pathTerm)));
+
+  let spawnCalled = false;
+  const invalidMode = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_CLIENT_MODE: 'builtin' },
+    spawnSync() {
+      spawnCalled = true;
+      return { status: 0, stdout: 'should-not-run\n', stderr: '' };
+    },
+  });
+  assert.equal(invalidMode.code, 1);
+  assert.match(invalidMode.stderr, /Invalid BLUENOTE_CLIENT_MODE "builtin"/);
+  assert.equal(spawnCalled, false);
+
+  spawnCalled = false;
+  const invalidFlag = await runCli(['doctor', '--client-mode=builtin'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync() {
+      spawnCalled = true;
+      return { status: 0, stdout: 'should-not-run\n', stderr: '' };
+    },
+  });
+  assert.equal(invalidFlag.code, 1);
+  assert.match(invalidFlag.stderr, /Invalid --client-mode "builtin"/);
+  assert.equal(spawnCalled, false);
 }
 
 async function testDoctorReportsBrokenClients() {
@@ -384,6 +1227,89 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
   }
 }
 
+async function testClientLaunchUsesBuiltAndPathModes() {
+  const tempBin = makeTempDir('client-mode-path');
+  const builtDir = makeTempDir('client-mode-built');
+  const { root, env } = makeDaemonEnv();
+  try {
+    const pathTerm = path.join(tempBin, 'bluenote-term');
+    const builtTerm = path.join(builtDir, 'bluenote-term');
+    writeExecutable(pathTerm);
+    writeExecutable(builtTerm);
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+
+    const built = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir }, spawn });
+    assert.equal(built.code, 0);
+    assert.equal(calls[0].command, builtTerm);
+    assert.deepEqual(calls[0].args, ['--smoke']);
+
+    const pathMode = await runCli(['tui', '--client-mode', 'path', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir }, spawn });
+    assert.equal(pathMode.code, 0);
+    assert.equal(calls[1].command, pathTerm);
+    assert.deepEqual(calls[1].args, ['--smoke']);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testBuiltModeMissingClientMessage() {
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const result = await runCli(['tui'], { env: { ...env, PATH: '', BLUENOTE_CLIENT_MODE: 'built', BLUENOTE_BUILT_CLIENT_DIR: path.join(root, 'missing-built') } });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Built client bluenote-term was not found/);
+    assert.match(result.stderr, /BLUENOTE_BUILT_CLIENT_DIR/);
+    assert.match(result.stderr, /--client-mode path/);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testClientModeValidation() {
+  const tempBin = makeTempDir('client-mode-validation');
+  const { root, env } = makeDaemonEnv();
+  try {
+    writeExecutable(path.join(tempBin, 'bluenote-term'));
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    let spawnCalled = false;
+    function spawn() {
+      spawnCalled = true;
+      throw new Error('invalid mode should not spawn client');
+    }
+
+    const invalidFlag = await runCli(['tui', '--client-mode=builtin', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
+    assert.equal(invalidFlag.code, 1);
+    assert.match(invalidFlag.stderr, /Invalid --client-mode "builtin"/);
+    assert.match(invalidFlag.stderr, /auto, path, or built/);
+
+    const missingValue = await runCli(['tui', '--client-mode', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
+    assert.equal(missingValue.code, 1);
+    assert.match(missingValue.stderr, /Missing value for --client-mode/);
+    assert.match(missingValue.stderr, /auto, path, or built/);
+
+    const invalidEnv = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_CLIENT_MODE: 'builtin' }, spawn });
+    assert.equal(invalidEnv.code, 1);
+    assert.match(invalidEnv.stderr, /Invalid BLUENOTE_CLIENT_MODE "builtin"/);
+    assert.equal(spawnCalled, false);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning() {
   const tempBin = makeTempDir('client-stale-launch');
   const { root, env } = makeDaemonEnv();
@@ -530,18 +1456,29 @@ async function testBuildOutputExists() {
 
 const tests = [
   testPackageMetadata,
+  testVersionStatusScript,
+  testVersionStatusScriptFailures,
+  testReadmeStructureContract,
+  testDevLocalScriptsContract,
+  testInstallerPreflightContract,
+  testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
   testCommandDiscovery,
+  testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,
   testDoctorReportsBrokenClients,
+  testDoctorReportsClientRuntimeModes,
   testUnknownCommand,
   testDaemonLifecycle,
   testDaemonStartDoesNotExposeTokenInArgv,
   testStaleDaemonMetadata,
   testClientLaunchRequiresDaemon,
   testClientLaunchUsesPathAndDaemonEnv,
+  testClientLaunchUsesBuiltAndPathModes,
+  testBuiltModeMissingClientMessage,
+  testClientModeValidation,
   testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning,
   testWindowsClientLaunchUsesShellForCmdShims,
   testMissingClientMessage,
