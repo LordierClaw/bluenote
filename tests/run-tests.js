@@ -313,6 +313,84 @@ async function testDevLocalScriptsContract() {
   assert.doesNotMatch(uninstallDryRun.stdout, /bun unlink @lordierclaw\/bluenote-term/);
 }
 
+async function testDevVerifyLocalScriptsContract() {
+  const verifySh = readScript('scripts/dev-verify-local.sh');
+  const verifyPs = readScript('scripts/dev-verify-local.ps1');
+
+  assert.match(verifySh, /set -euo pipefail/);
+  assert.match(verifySh, /--dry-run/);
+  assert.match(verifySh, /--keep-temp/);
+  assert.match(verifySh, /NPM_CONFIG_PREFIX|npm_prefix/);
+  assert.match(verifySh, /NPM_CONFIG_CACHE|npm_cache/);
+  assert.match(verifySh, /NPM_CONFIG_USERCONFIG|npm_config_file/);
+  assert.match(verifySh, /BLUENOTE_CONFIG_HOME/);
+  assert.match(verifySh, /BLUENOTE_DATA_HOME/);
+  assert.match(verifySh, /BLUENOTE_CACHE_HOME/);
+  assert.match(verifySh, /npm pack/);
+  assert.match(verifySh, /npm install -g/);
+  assert.ok(verifySh.indexOf('npm pack') < verifySh.indexOf('npm install -g'), 'shell verification should pack before install');
+  assert.match(verifySh, /bluenote --help/);
+  assert.match(verifySh, /bluenote version/);
+  assert.match(verifySh, /bluenote doctor/);
+  assert.match(verifySh, /bluenote daemon start/);
+  assert.match(verifySh, /bluenote daemon status/);
+  assert.match(verifySh, /bluenote daemon stop/);
+  assert.match(verifySh, /daemon_started/);
+  assert.match(verifySh, /trap .*cleanup/);
+  assert.match(verifySh, /keep_temp/);
+  assert.match(verifySh, /rm -rf/);
+
+  assert.match(verifyPs, /param\s*\(/i);
+  assert.match(verifyPs, /\[switch\]\s*\$DryRun/i);
+  assert.match(verifyPs, /\[switch\]\s*\$KeepTemp/i);
+  assert.match(verifyPs, /NPM_CONFIG_PREFIX|npmPrefix/);
+  assert.match(verifyPs, /NPM_CONFIG_CACHE|npmCache/);
+  assert.match(verifyPs, /NPM_CONFIG_USERCONFIG|npmUserConfig/);
+  assert.match(verifyPs, /BLUENOTE_CONFIG_HOME/);
+  assert.match(verifyPs, /BLUENOTE_DATA_HOME/);
+  assert.match(verifyPs, /BLUENOTE_CACHE_HOME/);
+  assert.match(verifyPs, /npm pack/);
+  assert.match(verifyPs, /npm install -g/);
+  assert.ok(verifyPs.indexOf('npm pack') < verifyPs.indexOf('npm install -g'), 'PowerShell verification should pack before install');
+  assert.match(verifyPs, /bluenote --help/);
+  assert.match(verifyPs, /bluenote version/);
+  assert.match(verifyPs, /bluenote doctor/);
+  assert.match(verifyPs, /bluenote daemon start/);
+  assert.match(verifyPs, /bluenote daemon status/);
+  assert.match(verifyPs, /bluenote daemon stop/);
+  assert.match(verifyPs, /daemonStarted/);
+  assert.match(verifyPs, /bluenote-core/);
+  assert.match(verifyPs, /@lordierclaw\/bluenote-core/);
+  assert.match(verifyPs, /finally/);
+  assert.match(verifyPs, /Remove-Item/);
+
+  const verifyDryRun = runScript('scripts/dev-verify-local.sh', ['--web', '--dry-run']);
+  assert.equal(verifyDryRun.status, 0, verifyDryRun.stderr);
+  assert.match(verifyDryRun.stdout, /npm pack/);
+  assert.match(verifyDryRun.stdout, /npm install -g/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_PREFIX=/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_CACHE=/);
+  assert.match(verifyDryRun.stdout, /NPM_CONFIG_USERCONFIG=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_CONFIG_HOME=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_DATA_HOME=/);
+  assert.match(verifyDryRun.stdout, /BLUENOTE_CACHE_HOME=/);
+  assert.match(verifyDryRun.stdout, /bluenote --help/);
+  assert.match(verifyDryRun.stdout, /bluenote version/);
+  assert.match(verifyDryRun.stdout, /bluenote doctor/);
+  const startIndex = verifyDryRun.stdout.indexOf('bluenote daemon start');
+  const statusIndex = verifyDryRun.stdout.indexOf('bluenote daemon status');
+  const stopIndex = verifyDryRun.stdout.indexOf('bluenote daemon stop');
+  assert.notEqual(startIndex, -1, 'dry-run should start daemon');
+  assert.notEqual(statusIndex, -1, 'dry-run should check daemon status');
+  assert.notEqual(stopIndex, -1, 'dry-run should stop daemon');
+  assert.ok(startIndex < statusIndex && statusIndex < stopIndex, 'daemon flow should be start/status/stop');
+  assert.match(verifyDryRun.stdout, /cleanup temp paths/);
+
+  const keepTempDryRun = runScript('scripts/dev-verify-local.sh', ['--web', '--dry-run', '--keep-temp']);
+  assert.equal(keepTempDryRun.status, 0, keepTempDryRun.stderr);
+  assert.match(keepTempDryRun.stdout, /keeping temp paths/);
+}
+
 async function testHelpDoesNotLoadClients() {
   const result = await runCli(['--help'], {
     clientLoader() {
@@ -732,6 +810,7 @@ const tests = [
   testVersionStatusScriptFailures,
   testReadmeStructureContract,
   testDevLocalScriptsContract,
+  testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,

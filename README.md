@@ -127,6 +127,24 @@ Fast local install/uninstall scripts are available for sibling checkout developm
 
 Default local install mode links the distribution CLI and WebUI. Add `--tui`/`-Tui` or use `--all`/`-All` to include the Bun-based terminal package from `../bluenote-term/packages/term`. Use `--skip-check`/`-SkipCheck` to skip repo checks and `--dry-run`/`-DryRun` to print commands without changing global links.
 
+For release-like local verification without publishing, pack local artifacts and install them into an isolated temporary npm prefix with separate BlueNote config/data/cache paths:
+
+```sh
+./scripts/dev-verify-local.sh --web --dry-run
+./scripts/dev-verify-local.sh --web
+# Include both optional clients when local package verification is available:
+./scripts/dev-verify-local.sh --all
+```
+
+```powershell
+.\scripts\dev-verify-local.ps1 -Web -DryRun
+.\scripts\dev-verify-local.ps1 -Web
+# Include both optional clients when local package verification is available:
+.\scripts\dev-verify-local.ps1 -All
+```
+
+Use `--keep-temp`/`-KeepTemp` to preserve the temporary prefix and isolated state directories for inspection after a verification run.
+
 ## Scripts
 
 ```sh
@@ -137,6 +155,7 @@ npm run check
 npm run version:status -- --allow-git-deps
 ./scripts/dev-install-local.sh --all --dry-run
 ./scripts/dev-uninstall-local.sh --all --dry-run
+./scripts/dev-verify-local.sh --web --dry-run
 node dist/bin.js --help
 node dist/bin.js version
 node dist/bin.js doctor
