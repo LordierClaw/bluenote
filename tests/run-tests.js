@@ -185,21 +185,45 @@ async function httpGetJson(url, headers = {}) {
 }
 
 
-function readSiblingReadmes() {
-  const workspaceRoot = path.resolve(__dirname, '..', '..');
-  const readmes = {
-    bluenote: path.join(workspaceRoot, 'bluenote', 'README.md'),
-    'bluenote-core': path.join(workspaceRoot, 'bluenote-core', 'README.md'),
-    'bluenote-webui': path.join(workspaceRoot, 'bluenote-webui', 'README.md'),
-    'bluenote-term': path.join(workspaceRoot, 'bluenote-term', 'README.md'),
+function readWorkspaceReadmes(workspaceRoot = path.resolve(__dirname, '..', '..')) {
+  const repoFiles = {
+    bluenote: {
+      readme: path.join(workspaceRoot, 'bluenote', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote', 'package.json'),
+      packageName: '@lordierclaw/bluenote',
+    },
+    'bluenote-core': {
+      readme: path.join(workspaceRoot, 'bluenote-core', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-core', 'package.json'),
+      packageName: '@lordierclaw/bluenote-core',
+    },
+    'bluenote-webui': {
+      readme: path.join(workspaceRoot, 'bluenote-webui', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-webui', 'package.json'),
+      packageName: '@lordierclaw/bluenote-webui',
+    },
+    'bluenote-term': {
+      readme: path.join(workspaceRoot, 'bluenote-term', 'README.md'),
+      packageJson: path.join(workspaceRoot, 'bluenote-term', 'packages', 'term', 'package.json'),
+      packageName: '@lordierclaw/bluenote-term',
+    },
   };
-  for (const readmePath of Object.values(readmes)) {
-    if (!fs.existsSync(readmePath)) {
-      process.stdout.write(`SKIP README contract: missing sibling README ${readmePath}\n`);
+  for (const [repoName, repo] of Object.entries(repoFiles)) {
+    if (!fs.existsSync(repo.readme) || !fs.existsSync(repo.packageJson)) {
+      process.stdout.write(`SKIP README contract: missing sibling checkout for ${repoName}\n`);
+      return undefined;
+    }
+    const parsed = JSON.parse(fs.readFileSync(repo.packageJson, 'utf8'));
+    if (parsed.name !== repo.packageName) {
+      process.stdout.write(`SKIP README contract: ${repoName} package mismatch at ${repo.packageJson}\n`);
       return undefined;
     }
   }
-  return Object.fromEntries(Object.entries(readmes).map(([repoName, readmePath]) => [repoName, fs.readFileSync(readmePath, 'utf8')]))
+  return Object.fromEntries(Object.entries(repoFiles).map(([repoName, repo]) => [repoName, fs.readFileSync(repo.readme, 'utf8')]))
+}
+
+function readSiblingReadmes() {
+  return readWorkspaceReadmes();
 }
 
 async function testPackageMetadata() {
