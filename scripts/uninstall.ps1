@@ -77,13 +77,13 @@ try {
   Write-Host '  npm uninstall -g @lordierclaw/bluenote-webui'
   Write-Host '  npm uninstall -g @lordierclaw/bluenote-term'
   $builtDir = Get-RecordedBuiltClientDir
-  Write-Host "  remove managed built client shim: $(Join-Path $builtDir 'bluenote-term.cmd')"
+  Write-Host "  remove managed built client executable: $(Join-Path $builtDir 'bluenote-term.exe')"
   Write-Host '  interactive choices on conflicts: upgrade, repair, skip optional clients, abort'
   Write-Host '  -Yes/non-interactive contract: fail instead of overwriting unknown/conflicting files'
   Write-Host '  preserve user notes/config/data during normal uninstall'
   Write-Host '  Never delete user notes/config/data unless -PurgeData exact confirmation is supplied'
   Write-Host '  purge confirmation phrase: delete my bluenote data'
-  if ($PurgeConfig) { Write-Host '  purge config after package removal' }
+  if ($PurgeConfig) { Write-Host "  purge config after package removal: $(Join-Path (Get-ConfigHome) 'bluenote')" }
   if ($PurgeCache) { Write-Host '  purge cache after package removal' }
   if ($PurgeData) { Write-Host '  purge data after exact confirmation phrase' }
   Write-Host '  on failure: best-effort rollback current-run artifacts and print Recovery command'
@@ -94,11 +94,11 @@ try {
   try { Invoke-CommandLine @('npm','uninstall','-g','@lordierclaw/bluenote-webui') } catch {}
   try { Invoke-CommandLine @('npm','uninstall','-g','@lordierclaw/bluenote-term') } catch {}
   $builtDir = Get-RecordedBuiltClientDir
-  if (-not $DryRun) { Remove-Item -LiteralPath (Join-Path $builtDir 'bluenote-term.cmd') -Force -ErrorAction SilentlyContinue }
+  if (-not $DryRun) { Remove-Item -LiteralPath (Join-Path $builtDir 'bluenote-term.exe') -Force -ErrorAction SilentlyContinue }
   $configHome = Get-ConfigHome
   if (-not $DryRun) { Remove-Item -LiteralPath (Join-Path (Join-Path $configHome 'bluenote') 'client-mode.env') -Force -ErrorAction SilentlyContinue }
   if ($PurgeCache) { Remove-Item -LiteralPath (Join-Path $HOME 'AppData\Local\BlueNote\cache') -Recurse -Force -ErrorAction SilentlyContinue }
-  if ($PurgeConfig) { Remove-Item -LiteralPath (Join-Path $HOME 'AppData\Roaming\BlueNote') -Recurse -Force -ErrorAction SilentlyContinue }
+  if ($PurgeConfig) { Remove-Item -LiteralPath (Join-Path (Get-ConfigHome) 'bluenote') -Recurse -Force -ErrorAction SilentlyContinue }
   if ($PurgeData) { Remove-Item -LiteralPath (Join-Path $HOME 'AppData\Local\BlueNote\data') -Recurse -Force -ErrorAction SilentlyContinue }
   Write-Host 'BlueNote uninstall complete. User notes/config/data preserved unless purge flags were confirmed.'
 } catch {

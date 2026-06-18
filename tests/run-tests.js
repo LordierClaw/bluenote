@@ -126,6 +126,32 @@ function runScript(relativePath, args = [], options = {}) {
   });
 }
 
+function writeFakeNpm(binDir) {
+  writeExecutable(path.join(binDir, 'npm'), [
+    '#!/usr/bin/env bash',
+    'if [ "$1" = "list" ] && [ "$2" = "-g" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_LIST_JSON\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_PREFIX\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "config" ] && [ "$2" = "get" ]; then',
+    "  printf '%s\\n' \"$BLUENOTE_TEST_NPM_CONFIG_GET\"",
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "ping" ]; then',
+    '  if [ -n "$BLUENOTE_TEST_NPM_PING_LOG" ]; then',
+    "    printf '%s\\n' \"$*\" >> \"$BLUENOTE_TEST_NPM_PING_LOG\"",
+    '  fi',
+    '  exit "${BLUENOTE_TEST_NPM_PING_STATUS:-0}"',
+    'fi',
+    'exit 0',
+    '',
+  ].join('\n'));
+}
+
 function httpGet(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const request = http.get(url, { headers }, (response) => {
@@ -274,6 +300,11 @@ async function testReadmeStructureContract() {
     assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-core\b/, `${repoName} README uses an old unscoped core package install example`);
     assert.doesNotMatch(readme, /npm install(?: -g)? bluenote\b/, `${repoName} README uses an old unscoped distribution package install example`);
   }
+
+  assert.match(readmes.bluenote, /development mode may use pinned Git deps/i, 'bluenote README should explain that development mode may use pinned Git dependencies');
+  assert.match(readmes.bluenote, /release mode must use published version deps/i, 'bluenote README should explain that release mode requires published version dependencies');
+  assert.match(readmes.bluenote, /npm run version:status\s+is the release check/i, 'bluenote README should call out npm run version:status as the release check');
+  assert.doesNotMatch(readmes.bluenote, /release-like dependency modes, prefer published npm versions or immutable Git tags\/commits/i, 'bluenote README should not describe Git dependencies as acceptable in release mode');
 }
 
 async function testDevLocalScriptsContract() {
@@ -377,15 +408,19 @@ async function testInstallerPreflightContract() {
   assert.match(tuiDryRun.stdout, /BLUENOTE_CLIENT_MODE=built/);
   assert.match(tuiDryRun.stdout, /BLUENOTE_BUILT_CLIENT_DIR/);
   assert.match(tuiDryRun.stdout, /client-mode record/i);
-  assert.match(tuiDryRun.stdout, /managed built client shim/i);
+  assert.match(tuiDryRun.stdout, /managed built client executable/i);
   assert.doesNotMatch(tuiDryRun.stdout, /bun install|fallback to Bun/i);
 
-  assert.match(installSh, /managed built client shim/);
+  const builtModeWithoutTui = runScript('scripts/install.sh', ['--client-mode', 'built', '--dry-run']);
+  assert.notEqual(builtModeWithoutTui.status, 0);
+  assert.match(builtModeWithoutTui.stderr, /--client-mode built requires --with-tui/i);
+
+  assert.match(installSh, /managed built client executable/);
   assert.match(installSh, /BLUENOTE_TERM_ARTIFACT_PATH/);
   assert.doesNotMatch(installSh, /exec bluenote-term/);
-  assert.match(installPs, /Set-Content -LiteralPath \$shimPath/);
+  assert.match(installPs, /Copy-Item -LiteralPath \$env:BLUENOTE_TERM_ARTIFACT_PATH -Destination \$shimPath -Force/);
   assert.match(installPs, /Set-Content -LiteralPath \$recordPath/);
-  assert.match(installPs, /bluenote-term\.cmd/);
+  assert.match(installPs, /bluenote-term\.exe/);
   assert.match(installPs, /BLUENOTE_CLIENT_MODE=built/);
 
   const allDryRun = runScript('scripts/install.sh', ['--all', '--dry-run']);
@@ -397,6 +432,140 @@ async function testInstallerPreflightContract() {
   assert.equal(githubDryRun.status, 0, githubDryRun.stderr);
   assert.match(githubDryRun.stdout, /@lordierclaw:registry=https:\/\/npm\.pkg\.github\.com/);
   assert.match(githubDryRun.stdout, /NODE_AUTH_TOKEN|GH_TOKEN/);
+
+  const preflightBin = makeTempDir('installer-preflight-bin');
+  const preflightPrefix = makeTempDir('installer-preflight-prefix');
+  writeFakeNpm(preflightBin);
+
+  const oldPackageRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { bluenote: { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(oldPackageRun.status, 0);
+  assert.match(oldPackageRun.stderr + oldPackageRun.stdout, /old\/unscoped package installed: bluenote@0\.0\.5/i);
+
+  const olderScopedRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(olderScopedRun.status, 0);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+
+  const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote-term': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(olderScopedTermRun.status, 0);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+
+  const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote-term': { version: '0.0.5' } } }),
+    },
+  });
+  assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+
+  const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
+  const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
+    cwd: outOfRepoCwd,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: { '@lordierclaw/bluenote': { version: '0.0.5' } } }),
+    },
+  });
+  assert.notEqual(outOfRepoVersionRun.status, 0);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+
+  const partialConfigHome = makeTempDir('installer-partial-config-home');
+  fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });
+  fs.writeFileSync(path.join(partialConfigHome, 'bluenote', 'client-mode.env'), 'BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=/missing\n');
+  const partialRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_CONFIG_HOME: partialConfigHome,
+    },
+  });
+  assert.notEqual(partialRun.status, 0);
+  assert.match(partialRun.stderr + partialRun.stdout, /partial previous install detected: client-mode record exists without built client executable/i);
+
+  const recordedBuiltConfigHome = makeTempDir('installer-recorded-built-config-home');
+  const preflightRecordedBuiltDir = path.join(makeTempDir('installer-recorded-built-dir'), 'clients');
+  fs.mkdirSync(path.join(recordedBuiltConfigHome, 'bluenote'), { recursive: true });
+  fs.mkdirSync(preflightRecordedBuiltDir, { recursive: true });
+  fs.writeFileSync(path.join(preflightRecordedBuiltDir, 'bluenote-term'), 'existing built client\n');
+  fs.writeFileSync(path.join(recordedBuiltConfigHome, 'bluenote', 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${preflightRecordedBuiltDir}\n`);
+  const recordedBuiltRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_CONFIG_HOME: recordedBuiltConfigHome,
+    },
+  });
+  assert.equal(recordedBuiltRun.status, 0, recordedBuiltRun.stderr);
+  assert.doesNotMatch(recordedBuiltRun.stderr + recordedBuiltRun.stdout, /partial previous install detected/i);
+
+  const githubAuthRun = runScript('scripts/install.sh', ['--yes', '--registry', 'github', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_TEST_NPM_CONFIG_GET: 'undefined',
+      NODE_AUTH_TOKEN: '',
+      GH_TOKEN: '',
+    },
+  });
+  assert.notEqual(githubAuthRun.status, 0);
+  assert.match(githubAuthRun.stderr + githubAuthRun.stdout, /GitHub Packages auth missing/i);
+
+  const githubPingLog = path.join(makeTempDir('installer-github-ping-log'), 'npm-ping.log');
+  const githubReachableRun = runScript('scripts/install.sh', ['--yes', '--registry', 'github', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: preflightPrefix,
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+      BLUENOTE_TEST_NPM_CONFIG_GET: 'token-present',
+      BLUENOTE_TEST_NPM_PING_LOG: githubPingLog,
+    },
+  });
+  assert.equal(githubReachableRun.status, 0, githubReachableRun.stderr);
+  assert.match(fs.readFileSync(githubPingLog, 'utf8'), /ping --registry https:\/\/npm\.pkg\.github\.com/);
+
+  const prefixFailureRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
+    env: {
+      ...process.env,
+      PATH: `${preflightBin}${path.delimiter}${process.env.PATH || ''}`,
+      BLUENOTE_TEST_NPM_PREFIX: path.join(makeTempDir('installer-missing-prefix'), 'does-not-exist'),
+      BLUENOTE_TEST_NPM_LIST_JSON: JSON.stringify({ dependencies: {} }),
+    },
+  });
+  assert.notEqual(prefixFailureRun.status, 0);
+  assert.match(prefixFailureRun.stderr + prefixFailureRun.stdout, /npm global prefix not writable or missing/i);
 
   const conflictBin = makeTempDir('installer-conflict-bin');
   writeExecutable(path.join(conflictBin, 'bluenote'));
@@ -410,14 +579,89 @@ async function testInstallerPreflightContract() {
 
   const unknownArtifactDir = makeTempDir('installer-unknown-artifact');
   fs.writeFileSync(path.join(unknownArtifactDir, 'mystery-file'), 'do not overwrite');
-  const artifactConflict = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, BLUENOTE_BUILT_CLIENT_DIR: unknownArtifactDir } });
+  const artifactConflict = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], { env: { ...process.env, BLUENOTE_BUILT_CLIENT_DIR: unknownArtifactDir } });
   assert.notEqual(artifactConflict.status, 0);
   assert.match(artifactConflict.stderr + artifactConflict.stdout, /unknown files/i);
   assert.match(artifactConflict.stderr + artifactConflict.stdout, /non-interactive conflict failure/i);
 
+  const managedHome = makeTempDir('installer-default-built-home');
+  const managedBuiltDir = path.join(managedHome, '.local', 'share', 'bluenote', 'clients');
+  fs.mkdirSync(managedBuiltDir, { recursive: true });
+  fs.writeFileSync(path.join(managedBuiltDir, 'mystery-file'), 'do not overwrite');
+  const defaultCliOnly = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, HOME: managedHome } });
+  assert.equal(defaultCliOnly.status, 0, defaultCliOnly.stderr);
+  const defaultArtifactConflict = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], { env: { ...process.env, HOME: managedHome } });
+  assert.notEqual(defaultArtifactConflict.status, 0);
+  assert.match(defaultArtifactConflict.stderr + defaultArtifactConflict.stdout, /unknown files in built artifact install directory/i);
+  assert.match(defaultArtifactConflict.stderr + defaultArtifactConflict.stdout, new RegExp(escapeRegExp(managedBuiltDir)));
+
+  const fakeUnameBin = makeTempDir('installer-fake-uname-bin');
+  writeExecutable(path.join(fakeUnameBin, 'uname'), '#!/usr/bin/env bash\nif [ "$1" = "-s" ]; then\n  printf "FreeBSD\\n"\nelif [ "$1" = "-m" ]; then\n  printf "x86_64\\n"\nelse\n  printf "FreeBSD x86_64\\n"\nfi\n');
+  const unsupportedTuiDryRun = runScript('scripts/install.sh', ['--with-tui', '--dry-run'], { env: { ...process.env, PATH: `${fakeUnameBin}${path.delimiter}${process.env.PATH || ''}` } });
+  assert.notEqual(unsupportedTuiDryRun.status, 0);
+  assert.match(unsupportedTuiDryRun.stderr + unsupportedTuiDryRun.stdout, /unsupported OS\/architecture\/platform.*cannot install built terminal artifact/i);
+  assert.doesNotMatch(unsupportedTuiDryRun.stdout, /optional built terminal artifact: copy BLUENOTE_TERM_ARTIFACT_PATH/);
+  assert.doesNotMatch(unsupportedTuiDryRun.stdout, /BLUENOTE_CLIENT_MODE=built/);
+
   const nonInteractiveDefault = runScript('scripts/install.sh', []);
   assert.notEqual(nonInteractiveDefault.status, 0);
   assert.match(nonInteractiveDefault.stderr, /default install is interactive; use --yes/i);
+
+  const rollbackHome = makeTempDir('installer-rollback-home');
+  const rollbackBuiltDir = path.join(rollbackHome, '.local', 'share', 'bluenote', 'clients');
+  const rollbackConfigHome = path.join(rollbackHome, 'config-home');
+  const rollbackConfigDir = path.join(rollbackConfigHome, 'bluenote');
+  const rollbackBin = makeTempDir('installer-rollback-bin');
+  const rollbackInstalledBin = makeTempDir('installer-rollback-installed-bin');
+  const rollbackArtifact = path.join(makeTempDir('installer-artifact'), 'bluenote-term');
+  const rollbackNpmLog = path.join(makeTempDir('installer-rollback-npm-log'), 'npm.log');
+  fs.mkdirSync(rollbackBuiltDir, { recursive: true });
+  fs.mkdirSync(rollbackConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(rollbackBuiltDir, 'bluenote-term'), 'old built client\n');
+  fs.writeFileSync(path.join(rollbackConfigDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${rollbackBuiltDir}\n`);
+  writeExecutable(path.join(rollbackBin, 'node'), '#!/usr/bin/env bash\nexit 0\n');
+  writeExecutable(path.join(rollbackBin, 'npm'), `#!/usr/bin/env bash
+printf '%s\n' "$*" >> ${JSON.stringify(rollbackNpmLog)}
+if [ "$1" = "list" ] && [ "$2" = "-g" ]; then
+  printf '{"dependencies":{}}\n'
+  exit 0
+fi
+if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+  printf '%s\n' ${JSON.stringify(rollbackInstalledBin)}
+  exit 0
+fi
+if [ "$1" = "config" ] && [ "$2" = "get" ]; then
+  printf 'undefined\n'
+  exit 0
+fi
+if [ "$1" = "install" ]; then
+  cat > ${JSON.stringify(path.join(rollbackInstalledBin, 'bluenote'))} <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "doctor" ]; then
+  echo "doctor failed" >&2
+  exit 1
+fi
+exit 0
+EOF
+  chmod 755 ${JSON.stringify(path.join(rollbackInstalledBin, 'bluenote'))}
+fi
+exit 0
+`);
+  writeExecutable(rollbackArtifact, '#!/usr/bin/env bash\necho new built client\n');
+  const rollbackRun = runScript('scripts/install.sh', ['--yes', '--with-tui'], {
+    env: {
+      ...process.env,
+      HOME: rollbackHome,
+      BLUENOTE_CONFIG_HOME: rollbackConfigHome,
+      BLUENOTE_TERM_ARTIFACT_PATH: rollbackArtifact,
+      PATH: `${rollbackBin}${path.delimiter}${rollbackInstalledBin}${path.delimiter}${process.env.PATH || ''}`,
+    },
+  });
+  assert.notEqual(rollbackRun.status, 0);
+  assert.match(fs.readFileSync(rollbackNpmLog, 'utf8'), /uninstall -g @lordierclaw\/bluenote/);
+  assert.match(rollbackRun.stderr + rollbackRun.stdout, /restore artifact:/i);
+  assert.equal(fs.readFileSync(path.join(rollbackBuiltDir, 'bluenote-term'), 'utf8'), 'old built client\n');
+  assert.equal(fs.readFileSync(path.join(rollbackConfigDir, 'client-mode.env'), 'utf8'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${rollbackBuiltDir}\n`);
 
   const failRun = runScript('scripts/install.sh', ['--yes', '--simulate-failure-for-tests']);
   assert.notEqual(failRun.status, 0);
@@ -433,7 +677,7 @@ async function testInstallerPreflightContract() {
   assert.ok(stopIndex < uninstallIndex, 'uninstall should stop daemon before package removal');
   assert.match(uninstallDryRun.stdout, /@lordierclaw\/bluenote-webui/);
   assert.match(uninstallDryRun.stdout, /optionally remove managed @lordierclaw\/bluenote-term built terminal artifact/i);
-  assert.match(uninstallDryRun.stdout, /remove managed built client shim/i);
+  assert.match(uninstallDryRun.stdout, /remove managed built client executable/i);
   assert.match(uninstallDryRun.stdout, /preserve user notes\/config\/data/i);
   assert.doesNotMatch(uninstallDryRun.stdout, /rm -rf .*BLUENOTE_DATA_HOME/);
 
@@ -445,6 +689,14 @@ async function testInstallerPreflightContract() {
   const recordedUninstallDryRun = runScript('scripts/uninstall.sh', ['--dry-run'], { env: { ...process.env, BLUENOTE_CONFIG_HOME: uninstallConfigHome } });
   assert.equal(recordedUninstallDryRun.status, 0, recordedUninstallDryRun.stderr);
   assert.match(recordedUninstallDryRun.stdout, new RegExp(escapeRegExp(path.join(recordedBuiltDir, 'bluenote-term'))));
+
+  const xdgConfigHome = makeTempDir('uninstall-xdg-config-home');
+  const xdgConfigDir = path.join(xdgConfigHome, 'bluenote');
+  fs.mkdirSync(xdgConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(xdgConfigDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${recordedBuiltDir}\n`);
+  const xdgPurgeDryRun = runScript('scripts/uninstall.sh', ['--purge-config', '--dry-run'], { env: { ...process.env, XDG_CONFIG_HOME: xdgConfigHome } });
+  assert.equal(xdgPurgeDryRun.status, 0, xdgPurgeDryRun.stderr);
+  assert.match(xdgPurgeDryRun.stdout, new RegExp(escapeRegExp(path.join(xdgConfigHome, 'bluenote'))));
 
   const purgeWithoutPhrase = runScript('scripts/uninstall.sh', ['--purge-data', '--dry-run']);
   assert.notEqual(purgeWithoutPhrase.status, 0);

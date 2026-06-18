@@ -77,13 +77,13 @@ print_plan() {
   printf '  npm uninstall -g @lordierclaw/bluenote\n'
   printf '  npm uninstall -g @lordierclaw/bluenote-webui\n'
   printf '  npm uninstall -g @lordierclaw/bluenote-term\n'
-  printf '  remove managed built client shim: %s/bluenote-term\n' "$(recorded_built_client_dir)"
+  printf '  remove managed built client executable: %s/bluenote-term\n' "$(recorded_built_client_dir)"
   printf '  interactive choices on conflicts: upgrade, repair, skip optional clients, abort\n'
   printf '  --yes/non-interactive contract: fail instead of overwriting unknown/conflicting files\n'
   printf '  preserve user notes/config/data during normal uninstall\n'
   printf '  Never delete user notes/config/data unless --purge-data exact confirmation is supplied\n'
   printf '  purge confirmation phrase: delete my bluenote data\n'
-  [ "$PURGE_CONFIG" -eq 1 ] && printf '  purge config after confirmation/scope checks\n'
+  [ "$PURGE_CONFIG" -eq 1 ] && printf '  purge config after confirmation/scope checks: %s\n' "$CONFIG_DIR"
   [ "$PURGE_CACHE" -eq 1 ] && printf '  purge cache after package removal\n'
   [ "$PURGE_DATA" -eq 1 ] && printf '  purge data after exact confirmation phrase\n'
   printf '  on failure: best-effort rollback current-run artifacts and print Recovery command\n'
@@ -97,7 +97,7 @@ perform_uninstall() {
   run_cmd rm -f "$(recorded_built_client_dir)/bluenote-term"
   run_cmd rm -f "$CLIENT_MODE_FILE"
   if [ "$PURGE_CACHE" -eq 1 ]; then run_cmd rm -rf "${BLUENOTE_CACHE_HOME:-$HOME/.cache}/bluenote"; fi
-  if [ "$PURGE_CONFIG" -eq 1 ]; then run_cmd rm -rf "${BLUENOTE_CONFIG_HOME:-$HOME/.config}/bluenote"; fi
+  if [ "$PURGE_CONFIG" -eq 1 ]; then run_cmd rm -rf "$CONFIG_DIR"; fi
   if [ "$PURGE_DATA" -eq 1 ]; then run_cmd rm -rf "${BLUENOTE_DATA_HOME:-$HOME/.local/share}/bluenote"; fi
 }
 

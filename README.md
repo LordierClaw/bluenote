@@ -191,7 +191,7 @@ node dist/bin.js version
 node dist/bin.js doctor
 ```
 
-`npm run version:status` checks the four sibling package names and versions. By default it rejects release-mode Git dependencies; pass `--allow-git-deps` for the current local-development pinned-Git state.
+`npm run version:status` checks the four sibling package names and versions. Development mode may use pinned Git deps, so pass `--allow-git-deps` for the current local-development state. For releases, npm run version:status is the release check and rejects Git dependencies unless every BlueNote package dependency has been repinned to published version deps.
 
 ## Packaging and versions
 
@@ -199,7 +199,7 @@ The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` a
 
 The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
-For release-like dependency modes, prefer published npm versions or immutable Git tags/commits. Do not use moving branch dependencies such as `#main` for release-like installs.
+Release mode must use published version deps for BlueNote packages. Before publishing, this repo intentionally stays on a pinned Git dependency for `@lordierclaw/bluenote-core`; once the scoped packages are published, repin that dependency to the published package version and keep Git dependencies out of release verification.
 
 ## Cross-platform notes
 
