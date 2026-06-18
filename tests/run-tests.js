@@ -112,6 +112,19 @@ function runVersionStatus(args = [], options = {}) {
   });
 }
 
+function readScript(relativePath) {
+  const scriptPath = path.join(__dirname, '..', relativePath);
+  assert.ok(fs.existsSync(scriptPath), `missing script ${relativePath}`);
+  return fs.readFileSync(scriptPath, 'utf8');
+}
+
+function runScript(relativePath, args = []) {
+  return childProcess.spawnSync(path.join(__dirname, '..', relativePath), args, {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+}
+
 function httpGet(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const request = http.get(url, { headers }, (response) => {
@@ -260,6 +273,44 @@ async function testReadmeStructureContract() {
     assert.doesNotMatch(readme, /npm install(?: -g)? bluenote-core\b/, `${repoName} README uses an old unscoped core package install example`);
     assert.doesNotMatch(readme, /npm install(?: -g)? bluenote\b/, `${repoName} README uses an old unscoped distribution package install example`);
   }
+}
+
+async function testDevLocalScriptsContract() {
+  const installSh = readScript('scripts/dev-install-local.sh');
+  const uninstallSh = readScript('scripts/dev-uninstall-local.sh');
+  const installPs = readScript('scripts/dev-install-local.ps1');
+  const uninstallPs = readScript('scripts/dev-uninstall-local.ps1');
+
+  assert.match(installSh, /set -euo pipefail/);
+  assert.match(uninstallSh, /set -euo pipefail/);
+  for (const [name, script] of Object.entries({ installPs, uninstallPs })) {
+    assert.match(script, /param\s*\(/i, `${name} should define param(...)`);
+    assert.match(script, /\[switch\]\s*\$DryRun/i, `${name} should support -DryRun`);
+    assert.match(script, /\$LASTEXITCODE/, `${name} should fail on native command non-zero exits`);
+  }
+
+  const installDryRun = runScript('scripts/dev-install-local.sh', ['--all', '--dry-run']);
+  assert.equal(installDryRun.status, 0, installDryRun.stderr);
+  assert.match(installDryRun.stdout, /cd .*bluenote(?:\s|$)/);
+  assert.match(installDryRun.stdout, /npm (?:run check|link)/);
+  assert.match(installDryRun.stdout, /cd .*bluenote-webui(?:\s|$)/);
+  assert.match(installDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$)/);
+  assert.match(installDryRun.stdout, /bun link/);
+
+  const uninstallDryRun = runScript('scripts/dev-uninstall-local.sh', ['--all', '--dry-run']);
+  assert.equal(uninstallDryRun.status, 0, uninstallDryRun.stderr);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote(?:\s|$).*npm run check/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-webui(?:\s|$).*npm run check/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-term(?:\s|$).*bun run check/);
+  const stopIndex = uninstallDryRun.stdout.indexOf('bluenote daemon stop');
+  const unlinkIndex = uninstallDryRun.stdout.search(/npm unlink|bun unlink/);
+  assert.notEqual(stopIndex, -1, 'uninstall dry-run should stop daemon');
+  assert.notEqual(unlinkIndex, -1, 'uninstall dry-run should unlink packages');
+  assert.ok(stopIndex < unlinkIndex, 'uninstall should stop daemon before unlink attempts');
+  assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote/);
+  assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote-webui/);
+  assert.match(uninstallDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$).*bun unlink(?:\s|$)/);
+  assert.doesNotMatch(uninstallDryRun.stdout, /bun unlink @lordierclaw\/bluenote-term/);
 }
 
 async function testHelpDoesNotLoadClients() {
@@ -680,6 +731,7 @@ const tests = [
   testVersionStatusScript,
   testVersionStatusScriptFailures,
   testReadmeStructureContract,
+  testDevLocalScriptsContract,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,

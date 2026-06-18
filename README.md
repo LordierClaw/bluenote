@@ -109,7 +109,23 @@ $npmBin = if (Test-Path (Join-Path $npmPrefix "bin")) { Join-Path $npmPrefix "bi
 $env:Path = "$npmBin;$HOME\.bun\bin;$env:Path"
 ```
 
-Fast local install/uninstall scripts are planned later in this packaging sequence. Until those scripts land, use the manual link/unlink flow above.
+Fast local install/uninstall scripts are available for sibling checkout development:
+
+```sh
+./scripts/dev-install-local.sh --all --dry-run
+./scripts/dev-install-local.sh --all
+./scripts/dev-uninstall-local.sh --all --dry-run
+./scripts/dev-uninstall-local.sh --all
+```
+
+```powershell
+.\scripts\dev-install-local.ps1 -All -DryRun
+.\scripts\dev-install-local.ps1 -All
+.\scripts\dev-uninstall-local.ps1 -All -DryRun
+.\scripts\dev-uninstall-local.ps1 -All
+```
+
+Default local install mode links the distribution CLI and WebUI. Add `--tui`/`-Tui` or use `--all`/`-All` to include the Bun-based terminal package from `../bluenote-term/packages/term`. Use `--skip-check`/`-SkipCheck` to skip repo checks and `--dry-run`/`-DryRun` to print commands without changing global links.
 
 ## Scripts
 
@@ -119,6 +135,8 @@ npm run test
 npm run build
 npm run check
 npm run version:status -- --allow-git-deps
+./scripts/dev-install-local.sh --all --dry-run
+./scripts/dev-uninstall-local.sh --all --dry-run
 node dist/bin.js --help
 node dist/bin.js version
 node dist/bin.js doctor
