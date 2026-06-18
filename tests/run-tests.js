@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 
 const cli = require('../dist/cli.js');
-const { findCommandOnPath } = require('../dist/utils/command-discovery.js');
+const { findCommandOnPath, resolveClientCommand } = require('../dist/utils/command-discovery.js');
 const packageJson = require('../package.json');
 const packageLock = require('../package-lock.json');
 
@@ -436,7 +436,7 @@ async function testDoctorDoesNotLoadClients() {
   assert.match(result.stdout, /Distribution/);
   assert.match(result.stdout, /Clients/);
   assert.match(result.stdout, /Config/);
-  assert.match(result.stdout, /Bun for TUI: available/);
+  assert.match(result.stdout, /Bun for source TUI: available/);
 }
 
 async function testCommandDiscovery() {
@@ -469,6 +469,37 @@ async function testCommandDiscovery() {
   assert.equal(findCommandOnPath('node', { path: tempBin, platform: 'linux' }), undefined);
 }
 
+async function testClientRuntimeModeResolution() {
+  const pathBin = makeTempDir('runtime-path-bin');
+  const builtDir = makeTempDir('runtime-built-dir');
+  const pathTerm = path.join(pathBin, 'bluenote-term');
+  const builtTerm = path.join(builtDir, 'bluenote-term');
+  writeExecutable(pathTerm);
+  writeExecutable(builtTerm);
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: pathBin },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: pathTerm, mode: 'path' });
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: builtTerm, mode: 'built' });
+
+  assert.deepEqual(resolveClientCommand('bluenote-term', {
+    clientMode: 'path',
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    platform: 'linux',
+  }), { command: 'bluenote-term', path: pathTerm, mode: 'path' });
+
+  assert.equal(resolveClientCommand('bluenote-term', {
+    clientMode: 'built',
+    env: { PATH: pathBin, BLUENOTE_BUILT_CLIENT_DIR: path.join(builtDir, 'missing') },
+    platform: 'linux',
+  }), undefined);
+}
+
 async function testDoctorReportsOptionalClients() {
   const noClients = await runCli(['doctor'], {
     nodeVersion: '18.19.0',
@@ -479,7 +510,7 @@ async function testDoctorReportsOptionalClients() {
   assert.equal(noClients.code, 0);
   assert.match(noClients.stdout, /bluenote-webui: missing/);
   assert.match(noClients.stdout, /bluenote-term: missing/);
-  assert.match(noClients.stdout, /Bun for TUI: not found/);
+  assert.match(noClients.stdout, /Bun for source TUI: not found/);
   assert.doesNotMatch(noClients.stdout, /do-not-print-this|BLUENOTE_DAEMON_TOKEN/);
 
   const tempBin = makeTempDir('doctor-clients');
@@ -494,11 +525,88 @@ async function testDoctorReportsOptionalClients() {
     spawnSync: () => ({ status: 0, stdout: '1.3.14\n' }),
   });
   assert.equal(found.code, 0);
-  assert.match(found.stdout, /bluenote-webui: found/);
+  assert.match(found.stdout, /bluenote-webui: path/);
   assert.match(found.stdout, new RegExp(escapeRegExp(webPath)));
   assert.match(found.stdout, /version: 1\.3\.14/);
-  assert.match(found.stdout, /bluenote-term: found/);
+  assert.match(found.stdout, /bluenote-term: path/);
   assert.match(found.stdout, new RegExp(escapeRegExp(termPath)));
+}
+
+async function testDoctorReportsClientRuntimeModes() {
+  const tempBin = makeTempDir('doctor-mode-path');
+  const builtDir = makeTempDir('doctor-mode-built');
+  const pathTerm = path.join(tempBin, 'bluenote-term');
+  const builtTerm = path.join(builtDir, 'bluenote-term');
+  writeExecutable(pathTerm);
+  writeExecutable(builtTerm);
+
+  const built = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync(command) {
+      assert.notEqual(command, 'bun', 'doctor should not require Bun when built TUI is available');
+      return { status: 0, stdout: '2.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(built.code, 0);
+  assert.match(built.stdout, /bluenote-term: built/);
+  assert.match(built.stdout, new RegExp(escapeRegExp(builtTerm)));
+  assert.match(built.stdout, /Bun for source TUI: not required for built TUI/);
+
+  const pathMode = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir, BLUENOTE_CLIENT_MODE: 'path' },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '1.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(pathMode.code, 0);
+  assert.match(pathMode.stdout, /bluenote-term: path/);
+  assert.match(pathMode.stdout, new RegExp(escapeRegExp(pathTerm)));
+
+  const pathFlag = await runCli(['doctor', '--client-mode', 'path'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '1.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(pathFlag.code, 0);
+  assert.match(pathFlag.stdout, /bluenote-term: path/);
+  assert.match(pathFlag.stdout, new RegExp(escapeRegExp(pathTerm)));
+
+  let spawnCalled = false;
+  const invalidMode = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_CLIENT_MODE: 'builtin' },
+    spawnSync() {
+      spawnCalled = true;
+      return { status: 0, stdout: 'should-not-run\n', stderr: '' };
+    },
+  });
+  assert.equal(invalidMode.code, 1);
+  assert.match(invalidMode.stderr, /Invalid BLUENOTE_CLIENT_MODE "builtin"/);
+  assert.equal(spawnCalled, false);
+
+  spawnCalled = false;
+  const invalidFlag = await runCli(['doctor', '--client-mode=builtin'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir },
+    spawnSync() {
+      spawnCalled = true;
+      return { status: 0, stdout: 'should-not-run\n', stderr: '' };
+    },
+  });
+  assert.equal(invalidFlag.code, 1);
+  assert.match(invalidFlag.stderr, /Invalid --client-mode "builtin"/);
+  assert.equal(spawnCalled, false);
 }
 
 async function testDoctorReportsBrokenClients() {
@@ -660,6 +768,89 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
   }
 }
 
+async function testClientLaunchUsesBuiltAndPathModes() {
+  const tempBin = makeTempDir('client-mode-path');
+  const builtDir = makeTempDir('client-mode-built');
+  const { root, env } = makeDaemonEnv();
+  try {
+    const pathTerm = path.join(tempBin, 'bluenote-term');
+    const builtTerm = path.join(builtDir, 'bluenote-term');
+    writeExecutable(pathTerm);
+    writeExecutable(builtTerm);
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+
+    const built = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir }, spawn });
+    assert.equal(built.code, 0);
+    assert.equal(calls[0].command, builtTerm);
+    assert.deepEqual(calls[0].args, ['--smoke']);
+
+    const pathMode = await runCli(['tui', '--client-mode', 'path', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_BUILT_CLIENT_DIR: builtDir }, spawn });
+    assert.equal(pathMode.code, 0);
+    assert.equal(calls[1].command, pathTerm);
+    assert.deepEqual(calls[1].args, ['--smoke']);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testBuiltModeMissingClientMessage() {
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const result = await runCli(['tui'], { env: { ...env, PATH: '', BLUENOTE_CLIENT_MODE: 'built', BLUENOTE_BUILT_CLIENT_DIR: path.join(root, 'missing-built') } });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Built client bluenote-term was not found/);
+    assert.match(result.stderr, /BLUENOTE_BUILT_CLIENT_DIR/);
+    assert.match(result.stderr, /--client-mode path/);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testClientModeValidation() {
+  const tempBin = makeTempDir('client-mode-validation');
+  const { root, env } = makeDaemonEnv();
+  try {
+    writeExecutable(path.join(tempBin, 'bluenote-term'));
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    let spawnCalled = false;
+    function spawn() {
+      spawnCalled = true;
+      throw new Error('invalid mode should not spawn client');
+    }
+
+    const invalidFlag = await runCli(['tui', '--client-mode=builtin', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
+    assert.equal(invalidFlag.code, 1);
+    assert.match(invalidFlag.stderr, /Invalid --client-mode "builtin"/);
+    assert.match(invalidFlag.stderr, /auto, path, or built/);
+
+    const missingValue = await runCli(['tui', '--client-mode', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
+    assert.equal(missingValue.code, 1);
+    assert.match(missingValue.stderr, /Missing value for --client-mode/);
+    assert.match(missingValue.stderr, /auto, path, or built/);
+
+    const invalidEnv = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin, BLUENOTE_CLIENT_MODE: 'builtin' }, spawn });
+    assert.equal(invalidEnv.code, 1);
+    assert.match(invalidEnv.stderr, /Invalid BLUENOTE_CLIENT_MODE "builtin"/);
+    assert.equal(spawnCalled, false);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning() {
   const tempBin = makeTempDir('client-stale-launch');
   const { root, env } = makeDaemonEnv();
@@ -815,14 +1006,19 @@ const tests = [
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
   testCommandDiscovery,
+  testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,
   testDoctorReportsBrokenClients,
+  testDoctorReportsClientRuntimeModes,
   testUnknownCommand,
   testDaemonLifecycle,
   testDaemonStartDoesNotExposeTokenInArgv,
   testStaleDaemonMetadata,
   testClientLaunchRequiresDaemon,
   testClientLaunchUsesPathAndDaemonEnv,
+  testClientLaunchUsesBuiltAndPathModes,
+  testBuiltModeMissingClientMessage,
+  testClientModeValidation,
   testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning,
   testWindowsClientLaunchUsesShellForCmdShims,
   testMissingClientMessage,

@@ -9,7 +9,7 @@ This repo owns:
 - top-level `bluenote`/`bn` command routing
 - `--help`, `version`, and `doctor`
 - minimal local daemon lifecycle and capability reporting
-- optional client discovery on `PATH`
+- optional client discovery in explicit `auto`, `path`, and `built` runtime modes
 - distribution packaging and install guidance
 
 It does not own core note behavior, browser UI implementation, or terminal UI implementation. Those live in `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`.
@@ -28,7 +28,7 @@ npm install -g @lordierclaw/bluenote-term
 bluenote doctor
 ```
 
-The distribution package does not bundle UI clients. `bluenote doctor` reports whether `bluenote-webui` and `bluenote-term` are present on `PATH`, whether Bun is available for the terminal client, and whether the local daemon is running.
+The distribution package does not bundle UI clients. In the default `auto` client mode, `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. Built terminal artifacts do not require Bun at runtime; Bun is only needed for source/development TUI usage. `bluenote doctor` reports each client as `built`, `path`, `missing`, or `broken`, including the executable path and version/daemon handshake where available.
 
 Uninstall globally installed app packages with the same scoped names:
 
