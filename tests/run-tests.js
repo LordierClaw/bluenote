@@ -118,10 +118,11 @@ function readScript(relativePath) {
   return fs.readFileSync(scriptPath, 'utf8');
 }
 
-function runScript(relativePath, args = []) {
+function runScript(relativePath, args = [], options = {}) {
   return childProcess.spawnSync(path.join(__dirname, '..', relativePath), args, {
     cwd: path.join(__dirname, '..'),
     encoding: 'utf8',
+    env: options.env || process.env,
   });
 }
 
@@ -311,6 +312,107 @@ async function testDevLocalScriptsContract() {
   assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote-webui/);
   assert.match(uninstallDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$).*bun unlink(?:\s|$)/);
   assert.doesNotMatch(uninstallDryRun.stdout, /bun unlink @lordierclaw\/bluenote-term/);
+}
+
+async function testInstallerPreflightContract() {
+  const installSh = readScript('scripts/install.sh');
+  const uninstallSh = readScript('scripts/uninstall.sh');
+  const installPs = readScript('scripts/install.ps1');
+  const uninstallPs = readScript('scripts/uninstall.ps1');
+  const combined = [installSh, uninstallSh, installPs, uninstallPs].join('\n');
+
+  assert.match(installSh, /set -Eeuo pipefail/);
+  assert.match(uninstallSh, /set -Eeuo pipefail/);
+  for (const [name, script] of Object.entries({ installPs, uninstallPs })) {
+    assert.match(script, /param\s*\(/i, `${name} should define param(...)`);
+    assert.match(script, /\[switch\]\s*\$DryRun/i, `${name} should support dry-run`);
+    assert.match(script, /ExecutionPolicy|PSSecurityException/i, `${name} should mention PowerShell execution policy guidance`);
+    assert.match(script, /\[Console\]::Error\.WriteLine/, `${name} should print recovery errors without terminating before rollback`);
+  }
+
+  for (const command of ['bluenote', 'bn', 'bluenote-webui', 'bluenote-term']) {
+    assert.match(combined, new RegExp(command), `installer contract should detect PATH command ${command}`);
+  }
+  for (const packageName of ['bluenote', 'bluenote-webui', 'bluenote-term']) {
+    assert.match(combined, new RegExp(`old package|unscoped|${packageName}`), `installer contract should cover old/unscoped package ${packageName}`);
+  }
+  assert.match(combined, /older scoped package|lower version|version compare|semver/i, 'should detect older scoped packages/lower versions');
+  assert.match(combined, /newer installed version|newer than requested|downgrade/i, 'should fail safely for newer installed versions than requested');
+  assert.match(combined, /mixed install|npm.*built artifact|built artifact.*npm/i, 'should detect mixed npm/built-artifact installs');
+  assert.match(combined, /stale daemon|daemon metadata|daemon process/i, 'should detect stale daemon process/metadata');
+  assert.match(combined, /partial previous install|partial install|repair/i, 'should detect partial installs');
+  assert.match(combined, /unknown files|unknown\/conflicting files|install directory/i, 'should fail before overwriting unknown built artifact files');
+  assert.match(combined, /npm global prefix.*writable|prefix.*not writable|permission/i, 'should detect npm global prefix permission failures');
+  assert.match(combined, /GitHub Packages|NODE_AUTH_TOKEN|GH_TOKEN|npmrc|@lordierclaw:registry/i, 'should give GitHub Packages auth/registry guidance');
+  assert.match(combined, /unsupported.*(OS|architecture|platform)|skip optional/i, 'should handle unsupported built artifact platforms');
+  assert.match(combined, /missing required runtime|node.*npm|npm.*node/i, 'should detect missing node/npm runtimes');
+  assert.match(combined, /interrupted|trap|finally|SIGINT|SIGTERM/i, 'should handle interrupted install/uninstall');
+  assert.match(combined, /preflight.*before.*mutating|before mutating state/i, 'should run preflight before mutation');
+  assert.match(combined, /upgrade|repair|uninstall-reinstall|skip optional clients|abort/i, 'interactive conflict choices should be explicit');
+  assert.match(combined, /--yes|non-interactive/i, 'should support non-interactive mode');
+  assert.match(combined, /fail instead of overwriting|fail.*unknown|abort.*conflict/i, 'non-interactive mode should fail on unknown conflicts');
+  assert.match(combined, /dry-run conflict summary|planned actions|Plan:/i, 'dry-run should summarize planned actions and conflicts');
+  assert.match(combined, /rollback|best-effort rollback|Recovery command|recovery command/i, 'failure should rollback current-run artifacts and print recovery guidance');
+  assert.match(combined, /Never delete user notes|preserve.*notes|preserve.*config|preserve.*data/i, 'normal install/uninstall should preserve user data');
+  assert.match(combined, /--purge-data|-PurgeData/i, 'purge-data should be the only destructive user-data path');
+  assert.match(combined, /delete my bluenote data/i, 'purge-data should require exact typed confirmation');
+
+  const installDryRun = runScript('scripts/install.sh', ['--dry-run']);
+  assert.equal(installDryRun.status, 0, installDryRun.stderr);
+  assert.match(installDryRun.stdout, /Preflight checks/);
+  assert.match(installDryRun.stdout, /dry-run conflict summary|Planned actions/i);
+  assert.match(installDryRun.stdout, /@lordierclaw\/bluenote/);
+  assert.match(installDryRun.stdout, /preserve user notes\/config\/data/i);
+
+  const installYesDryRun = runScript('scripts/install.sh', ['--yes', '--dry-run']);
+  assert.equal(installYesDryRun.status, 0, installYesDryRun.stderr);
+  assert.match(installYesDryRun.stdout, /non-interactive safe defaults/i);
+  assert.match(installYesDryRun.stdout, /fail instead of overwriting unknown\/conflicting files/i);
+
+  const conflictBin = makeTempDir('installer-conflict-bin');
+  writeExecutable(path.join(conflictBin, 'bluenote'));
+  const conflictRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, PATH: `${conflictBin}${path.delimiter}${process.env.PATH || ''}` } });
+  assert.notEqual(conflictRun.status, 0);
+  assert.match(conflictRun.stderr + conflictRun.stdout, /non-interactive conflict failure/i);
+  assert.match(conflictRun.stderr + conflictRun.stdout, /bluenote/);
+
+  const missingRegistryValue = runScript('scripts/install.sh', ['--registry', '--dry-run']);
+  assert.notEqual(missingRegistryValue.status, 0);
+  assert.match(missingRegistryValue.stderr, /Missing value for --registry/);
+
+  const invalidRegistry = runScript('scripts/install.sh', ['--registry', 'invalid', '--dry-run']);
+  assert.notEqual(invalidRegistry.status, 0);
+  assert.match(invalidRegistry.stderr, /Invalid --registry/);
+
+  const unknownArtifactDir = makeTempDir('installer-unknown-artifact');
+  fs.writeFileSync(path.join(unknownArtifactDir, 'mystery-file'), 'do not overwrite');
+  const artifactConflict = runScript('scripts/install.sh', ['--yes', '--dry-run'], { env: { ...process.env, BLUENOTE_BUILT_CLIENT_DIR: unknownArtifactDir } });
+  assert.notEqual(artifactConflict.status, 0);
+  assert.match(artifactConflict.stderr + artifactConflict.stdout, /unknown files/i);
+  assert.match(artifactConflict.stderr + artifactConflict.stdout, /non-interactive conflict failure/i);
+
+  const recoveryRun = runScript('scripts/install.sh', []);
+  assert.notEqual(recoveryRun.status, 0);
+  assert.match(recoveryRun.stderr + recoveryRun.stdout, /Recovery command/);
+
+  const uninstallRecoveryRun = runScript('scripts/uninstall.sh', []);
+  assert.notEqual(uninstallRecoveryRun.status, 0);
+  assert.match(uninstallRecoveryRun.stderr + uninstallRecoveryRun.stdout, /Recovery command/);
+
+  const uninstallDryRun = runScript('scripts/uninstall.sh', ['--dry-run']);
+  assert.equal(uninstallDryRun.status, 0, uninstallDryRun.stderr);
+  assert.match(uninstallDryRun.stdout, /stop stale daemon|daemon metadata/i);
+  assert.match(uninstallDryRun.stdout, /preserve user notes\/config\/data/i);
+  assert.doesNotMatch(uninstallDryRun.stdout, /rm -rf .*BLUENOTE_DATA_HOME/);
+
+  const missingConfirmValue = runScript('scripts/uninstall.sh', ['--purge-data', '--confirm', '--dry-run']);
+  assert.notEqual(missingConfirmValue.status, 0);
+  assert.match(missingConfirmValue.stderr, /Missing value for --confirm/);
+
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.match(readme, /contract-first/i);
+  assert.match(readme, /Task 10 .*contract categories/i);
+  assert.doesNotMatch(readme, /Interactive mode presents conflicts and asks whether/i);
 }
 
 async function testDevVerifyLocalScriptsContract() {
@@ -1001,6 +1103,7 @@ const tests = [
   testVersionStatusScriptFailures,
   testReadmeStructureContract,
   testDevLocalScriptsContract,
+  testInstallerPreflightContract,
   testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,
   testVersionDoesNotLoadClients,

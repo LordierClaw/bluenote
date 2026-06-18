@@ -28,6 +28,24 @@ npm install -g @lordierclaw/bluenote-term
 bluenote doctor
 ```
 
+User installer/uninstaller entrypoints are being built contract-first. Today they provide preflight and dry-run planning for Linux/macOS and Windows without performing the full Task 11 install mutation:
+
+```sh
+./scripts/install.sh --dry-run
+./scripts/install.sh --yes --dry-run
+./scripts/uninstall.sh --dry-run
+```
+
+```powershell
+.\scripts\install.ps1 -DryRun
+.\scripts\install.ps1 -Yes -DryRun
+.\scripts\uninstall.ps1 -DryRun
+```
+
+The Task 10 installer scaffold records contract categories before the full Task 11 installer mutation exists: PATH command conflicts (`bluenote`, `bn`, `bluenote-webui`, `bluenote-term`), old unscoped package names, older/newer scoped package versions, mixed npm/built-artifact installs, stale daemon process or metadata, partial installs, unknown files in built artifact directories, unwritable npm global prefixes, npm/GitHub Packages registry or auth failures, unsupported built TUI OS/architecture, missing `node`/`npm`, interrupted runs, and Windows PowerShell execution policy guidance. Current dry-run output shows the planned action/conflict model, validates supported flags, fails non-interactive `--yes` on detected unknown conflicts, and keeps recovery/rollback messaging in place. The full interactive prompt flow for choosing upgrade, repair, uninstall/reinstall, skipping optional clients, or aborting remains a Task 11 implementation step.
+
+Normal install and uninstall never overwrite or delete user notes/config/data. `--purge-data` / `-PurgeData` is the only destructive user-data path and requires the exact typed confirmation phrase `delete my bluenote data`.
+
 The distribution package does not bundle UI clients. In the default `auto` client mode, `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. Built terminal artifacts do not require Bun at runtime; Bun is only needed for source/development TUI usage. `bluenote doctor` reports each client as `built`, `path`, `missing`, or `broken`, including the executable path and version/daemon handshake where available.
 
 Uninstall globally installed app packages with the same scoped names:
