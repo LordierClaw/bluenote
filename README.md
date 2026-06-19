@@ -192,9 +192,9 @@ node dist/bin.js version
 node dist/bin.js doctor
 ```
 
-`npm run version:status` checks the four sibling package names and versions. npm run version:status is the release check and requires exact published version dependencies for BlueNote packages. Development mode may use pinned Git deps when you intentionally pass `--allow-git-deps` for a local-only workspace.
+`npm run version:status` checks the four sibling package names and versions and rejects unsupported `@lordierclaw/bluenote-core` dependency specs. `latest` and exact published semver are both acceptable release-mode dependency shapes; development mode may use pinned Git deps when you intentionally pass `--allow-git-deps` for a local-only workspace.
 
-The distribution repo also owns the release gate for `@lordierclaw/bluenote`: the tag-driven release workflow runs the repo checks, verifies package metadata, and performs a fresh Docker `node:22-bookworm` install/smoke pass before npm publish and GitHub release creation are allowed to continue.
+The distribution repo also owns the release gate for `@lordierclaw/bluenote`: publishing a GitHub Release for the matching `v*` tag triggers the workflow, which runs the repo checks and a fresh Docker `node:22-bookworm` install/smoke pass before npm publish is allowed to continue.
 
 ## Packaging and versions
 
@@ -202,7 +202,7 @@ The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` a
 
 The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
-Release mode must use published version deps for BlueNote packages. The distribution package now pins `@lordierclaw/bluenote-core` to the exact published semver used by the coordinated BlueNote release, while `--allow-git-deps` remains available only for local development workspaces that intentionally opt into Git-pinned dependencies.
+The distribution package consumes the latest published `@lordierclaw/bluenote-core` by default instead of requiring a same-version coordinated release. For local development workspaces that intentionally opt into Git-pinned dependencies, keep using `npm run version:status -- --allow-git-deps`.
 
 ## Cross-platform notes
 

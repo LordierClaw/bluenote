@@ -86,7 +86,7 @@ function writeVersionStatusFixture(overrides = {}) {
       name: '@lordierclaw/bluenote',
       version: '0.1.0',
       dependencies: {
-        '@lordierclaw/bluenote-core': '0.1.0',
+        '@lordierclaw/bluenote-core': 'latest',
       },
     },
     'bluenote-core': { name: '@lordierclaw/bluenote-core', version: '0.1.0' },
@@ -94,14 +94,14 @@ function writeVersionStatusFixture(overrides = {}) {
       name: '@lordierclaw/bluenote-webui',
       version: '0.1.0',
       dependencies: {
-        '@lordierclaw/bluenote-core': '0.1.0',
+        '@lordierclaw/bluenote-core': 'latest',
       },
     },
     'bluenote-term': {
       name: '@lordierclaw/bluenote-term',
       version: '0.1.0',
       dependencies: {
-        '@lordierclaw/bluenote-core': '0.1.0',
+        '@lordierclaw/bluenote-core': 'latest',
       },
     },
   };
@@ -246,7 +246,7 @@ function readReleaseWorkflow() {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
-  assert.equal(packageJson.version, '0.4.3');
+  assert.equal(packageJson.version, '0.4.4');
   assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.version, packageJson.version);
@@ -261,8 +261,8 @@ async function testPackageMetadata() {
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
-  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], '0.4.3');
-  assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], '0.4.3');
+  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], 'latest');
+  assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], 'latest');
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
 }
@@ -283,6 +283,16 @@ async function testVersionStatusScript() {
   assert.match(result.stdout, /@lordierclaw\/bluenote-webui\s+0\.1\.0/);
   assert.match(result.stdout, /@lordierclaw\/bluenote-term\s+0\.1\.0/);
   assert.equal(result.stderr, '');
+
+  const exactDepRoot = writeVersionStatusFixture({
+    bluenote: {
+      dependencies: {
+        '@lordierclaw/bluenote-core': '0.1.0',
+      },
+    },
+  });
+  const exactDep = runVersionStatus(['--workspace-root', exactDepRoot]);
+  assert.equal(exactDep.status, 0, exactDep.stderr);
 }
 
 async function testVersionStatusScriptFailures() {
@@ -316,12 +326,12 @@ async function testVersionStatusScriptFailures() {
     const rangeDep = runVersionStatus(['--workspace-root', rangeDepRoot]);
     assert.notEqual(rangeDep.status, 0);
     assert.match(rangeDep.stderr, new RegExp(escapeRegExp(packagePath)));
-    assert.match(rangeDep.stderr, /must use an exact semver core dependency in release mode/);
+    assert.match(rangeDep.stderr, /must use latest, an exact semver, or a Git dependency/);
 
     const rangeDepAllowed = runVersionStatus(['--workspace-root', rangeDepRoot, '--allow-git-deps']);
     assert.notEqual(rangeDepAllowed.status, 0);
     assert.match(rangeDepAllowed.stderr, new RegExp(escapeRegExp(packagePath)));
-    assert.match(rangeDepAllowed.stderr, /must use an exact semver core dependency in release mode/);
+    assert.match(rangeDepAllowed.stderr, /must use latest, an exact semver, or a Git dependency/);
   }
 
   const badNameRoot = writeVersionStatusFixture({
@@ -388,8 +398,8 @@ async function testReadmeStructureContract() {
   }
 
   assert.match(readmes.bluenote, /development mode may use pinned Git deps/i, 'bluenote README should explain that development mode may use pinned Git dependencies');
-  assert.match(readmes.bluenote, /release mode must use published version deps/i, 'bluenote README should explain that release mode requires published version dependencies');
-  assert.match(readmes.bluenote, /npm run version:status\s+is the release check/i, 'bluenote README should call out npm run version:status as the release check');
+  assert.match(readmes.bluenote, /exact published semver are both acceptable release-mode dependency shapes/i, 'bluenote README should explain the allowed published core dependency shapes');
+  assert.match(readmes.bluenote, /npm run version:status`?\s+checks the four sibling package names and versions/i, 'bluenote README should describe the version status check');
   assert.doesNotMatch(readmes.bluenote, /release-like dependency modes, prefer published npm versions or immutable Git tags\/commits/i, 'bluenote README should not describe Git dependencies as acceptable in release mode');
 }
 
@@ -434,41 +444,20 @@ async function testDevLocalScriptsContract() {
 async function testReleaseWorkflowSiblingCheckoutContract() {
   const workflow = readReleaseWorkflow();
 
-  for (const repo of ['bluenote-core', 'bluenote-webui', 'bluenote-term']) {
-    assert.match(
-      workflow,
-      new RegExp(`Checkout ${escapeRegExp(repo)} release sibling`, 'm'),
-      `release workflow should checkout ${repo}`,
-    );
-    assert.match(
-      workflow,
-      new RegExp(`path:\\s+${escapeRegExp(repo)}`, 'm'),
-      `release workflow should place ${repo} in a predictable checkout path`,
-    );
-    assert.match(
-      workflow,
-      new RegExp(`for repo in [^\n]*${escapeRegExp(repo)}`, 'm'),
-      `release workflow should normalize ${repo} into the parent workspace contract`,
-    );
-  }
-
-  assert.ok(
-    workflow.includes('target="../${repo}"'),
-    'release workflow should expose ../<repo> paths for local sibling-path contract tests',
-  );
-  assert.ok(
-    workflow.includes('ln -s "$PWD/${repo}" "$target"'),
-    'release workflow should link nested checkouts into the parent workspace expected by local-dev scripts',
+  assert.match(
+    workflow,
+    /release:\s+types:\s+\[published\]/m,
+    'release workflow should run from published GitHub releases',
   );
   assert.match(
     workflow,
-    /npm install -g\s+\\\s*"\/workspace\/bluenote-core\/\$\{CORE_TARBALL\}"\s+\\\s*"\/workspace\/bluenote-webui\/\$\{WEBUI_TARBALL\}"\s+\\\s*"\/workspace\/bluenote-term\/packages\/term\/\$\{TERM_TARBALL\}"\s+\\\s*"\/workspace\/\$\{PACKAGE_TARBALL\}"/m,
-    'release workflow should install all tarballs in one npm transaction so Docker verification can resolve unpublished sibling versions locally',
+    /npm install -g\s+\\\s*@lordierclaw\/bluenote-webui@latest\s+\\\s*@lordierclaw\/bluenote-term@latest\s+\\\s*"\/workspace\/\$\{PACKAGE_TARBALL\}"/m,
+    'release workflow should verify the local distribution tarball alongside latest published optional clients',
   );
   assert.doesNotMatch(
     workflow,
-    /npm install -g\s+"\/workspace\/bluenote-core\/\$\{CORE_TARBALL\}"\s*npm install -g\s+"\/workspace\/bluenote-webui\/\$\{WEBUI_TARBALL\}"/m,
-    'release workflow should not install sibling tarballs sequentially during Docker verification',
+    /Checkout bluenote-core release sibling|Checkout bluenote-webui release sibling|Checkout bluenote-term release sibling/m,
+    'release workflow should no longer require same-tag sibling repo checkouts',
   );
 }
 
@@ -584,7 +573,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedRun.status, 0);
-  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.3/i);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.4/i);
 
   const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
     env: {
@@ -595,7 +584,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedTermRun.status, 0);
-  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.3/i);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.4/i);
 
   const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
     env: {
@@ -606,7 +595,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
-  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.3/i);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.4/i);
 
   const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
   const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
@@ -620,7 +609,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(outOfRepoVersionRun.status, 0);
-  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.3/i);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.4/i);
 
   const partialConfigHome = makeTempDir('installer-partial-config-home');
   fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });

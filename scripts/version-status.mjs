@@ -84,6 +84,10 @@ function isExactSemver(version) {
   return isSemver(version);
 }
 
+function isLatestDependency(version) {
+  return version === 'latest';
+}
+
 function dependencyEntries(packageJson) {
   return [
     ...Object.entries(packageJson.dependencies || {}),
@@ -112,10 +116,11 @@ function validatePackage(definition, packageJson, packagePath, options) {
     && typeof coreDependency === 'string'
     && !isGitDependency(coreDependency)
     && !isExactSemver(coreDependency)
+    && !isLatestDependency(coreDependency)
   ) {
     throw new Error(
-      `${packagePath}: ${definition.expectedName} must use an exact semver core dependency in release mode: `
-        + `@lordierclaw/bluenote-core@${coreDependency}.`,
+      `${packagePath}: ${definition.expectedName} must use latest, an exact semver, or a Git dependency for `
+        + `@lordierclaw/bluenote-core; found ${coreDependency}.`,
     );
   }
 
