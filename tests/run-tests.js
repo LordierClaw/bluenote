@@ -409,6 +409,16 @@ async function testDevLocalScriptsContract() {
   const installPs = readScript('scripts/dev-install-local.ps1');
   const uninstallPs = readScript('scripts/dev-uninstall-local.ps1');
 
+  const workspaceRoot = path.resolve(__dirname, '..', '..');
+  const requiredSiblingPaths = [
+    path.join(workspaceRoot, 'bluenote-webui', 'package.json'),
+    path.join(workspaceRoot, 'bluenote-term', 'packages', 'term', 'package.json'),
+  ];
+  if (requiredSiblingPaths.some((requiredPath) => !fs.existsSync(requiredPath))) {
+    process.stdout.write('SKIP dev local scripts contract: missing sibling checkout for bluenote-webui or bluenote-term\n');
+    return;
+  }
+
   assert.match(installSh, /set -euo pipefail/);
   assert.match(uninstallSh, /set -euo pipefail/);
   for (const [name, script] of Object.entries({ installPs, uninstallPs })) {
