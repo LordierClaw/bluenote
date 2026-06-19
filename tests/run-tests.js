@@ -254,6 +254,10 @@ async function testPackageMetadata() {
   assert.equal(packageLock.packages[''].version, packageJson.version);
   assert.equal(packageJson.bin.bluenote, './dist/bin.js');
   assert.equal(packageJson.bin.bn, './dist/bin.js');
+  assert.deepEqual(packageJson.repository, {
+    type: 'git',
+    url: 'https://github.com/LordierClaw/bluenote',
+  });
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
