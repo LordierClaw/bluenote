@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout bluenote-core release sibling
+        uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-core
+          ref: ${{ github.ref_name }}
+          path: bluenote-core
+
+      - name: Checkout bluenote-webui release sibling
+        uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-webui
+          ref: ${{ github.ref_name }}
+          path: bluenote-webui
+
+      - name: Checkout bluenote-term release sibling
+        uses: actions/checkout@v4
+        with:
+          repository: LordierClaw/bluenote-term
+          ref: ${{ github.ref_name }}
+          path: bluenote-term
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.38
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Run release gate
+        run: |
+          npm test
+          npm run version:status
+
+      - name: Pack distribution artifact
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --json > pack-output.json
+          PACKAGE_TARBALL=$(node -e "const output=require('./pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "package_tarball=${PACKAGE_TARBALL}" >> "$GITHUB_OUTPUT"
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify sibling package versions match release version
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.pack.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          test "$PACKAGE_VERSION" = "$(node -p "require('./bluenote-core/package.json').version")"
+          test "$PACKAGE_VERSION" = "$(node -p "require('./bluenote-webui/package.json').version")"
+          test "$PACKAGE_VERSION" = "$(node -p "require('./bluenote-term/packages/term/package.json').version")"
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ steps.pack.outputs.package_version }}
+        run: |
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION" || {
+            echo "tag $GITHUB_REF_NAME does not match v$PACKAGE_VERSION" >&2
+            exit 1
+          }
+
+      - name: Build and pack sibling release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm -C bluenote-core ci --include=dev
+          npm -C bluenote-core run check
+          npm -C bluenote-core pack --json > bluenote-core/pack-output.json
+
+          npm -C bluenote-webui ci --include=dev
+          npm -C bluenote-webui run check
+          npm -C bluenote-webui pack --json > bluenote-webui/pack-output.json
+
+          bun -C bluenote-term install
+          bun -C bluenote-term run check
+          (cd bluenote-term/packages/term && npm pack --json > ../../pack-output.json)
+
+      - name: Docker Node 22 coordinated tarball smoke verification
+        shell: bash
+        env:
+          PACKAGE_TARBALL: ${{ steps.pack.outputs.package_tarball }}
+        run: |
+          set -euo pipefail
+          CORE_TARBALL=$(node -e "const output=require('./bluenote-core/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          WEBUI_TARBALL=$(node -e "const output=require('./bluenote-webui/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          TERM_TARBALL=$(node -e "const output=require('./bluenote-term/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          docker run --rm \
+            -e CORE_TARBALL \
+            -e WEBUI_TARBALL \
+            -e TERM_TARBALL \
+            -e PACKAGE_TARBALL \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            node:22-bookworm \
+            bash -lc 'set -euo pipefail
+              npm install -g "/workspace/bluenote-core/${CORE_TARBALL}"
+              npm install -g "/workspace/bluenote-webui/${WEBUI_TARBALL}"
+              npm install -g "/workspace/bluenote-term/packages/term/${TERM_TARBALL}"
+              npm install -g "/workspace/${PACKAGE_TARBALL}"
+              bluenote --help >/tmp/bluenote-help.txt
+              bluenote version
+              bluenote doctor
+              bluenote daemon start
+              bluenote doctor
+              bluenote daemon stop
+            '
+
+  publish:
+    name: Publish npm package and GitHub release
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

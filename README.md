@@ -182,6 +182,7 @@ npm run typecheck
 npm run test
 npm run build
 npm run check
+npm run version:status
 npm run version:status -- --allow-git-deps
 ./scripts/dev-install-local.sh --all --dry-run
 ./scripts/dev-uninstall-local.sh --all --dry-run
@@ -191,7 +192,9 @@ node dist/bin.js version
 node dist/bin.js doctor
 ```
 
-`npm run version:status` checks the four sibling package names and versions. Development mode may use pinned Git deps, so pass `--allow-git-deps` for the current local-development state. For releases, npm run version:status is the release check and rejects Git dependencies unless every BlueNote package dependency has been repinned to published version deps.
+`npm run version:status` checks the four sibling package names and versions. npm run version:status is the release check and requires exact published version dependencies for BlueNote packages. Development mode may use pinned Git deps when you intentionally pass `--allow-git-deps` for a local-only workspace.
+
+The distribution repo also owns the release gate for `@lordierclaw/bluenote`: the tag-driven release workflow runs the repo checks, verifies package metadata, and performs a fresh Docker `node:22-bookworm` install/smoke pass before npm publish and GitHub release creation are allowed to continue.
 
 ## Packaging and versions
 
@@ -199,7 +202,7 @@ The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` a
 
 The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
-Release mode must use published version deps for BlueNote packages. Before publishing, this repo intentionally stays on a pinned Git dependency for `@lordierclaw/bluenote-core`; once the scoped packages are published, repin that dependency to the published package version and keep Git dependencies out of release verification.
+Release mode must use published version deps for BlueNote packages. The distribution package now pins `@lordierclaw/bluenote-core` to the exact published semver used by the coordinated BlueNote release, while `--allow-git-deps` remains available only for local development workspaces that intentionally opt into Git-pinned dependencies.
 
 ## Cross-platform notes
 

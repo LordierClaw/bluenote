@@ -1,6 +1,6 @@
 {
   "name": "@lordierclaw/bluenote",
-  "version": "0.1.0",
+  "version": "0.4.2",
   "description": "Official BlueNote distribution CLI.",
   "license": "MIT",
   "files": [
@@ -25,7 +25,7 @@
     "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
-    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#a942cd17e1d3df7947b8f9198672f04165ef179a"
+    "@lordierclaw/bluenote-core": "0.4.2"
   },
   "devDependencies": {
     "@types/node": "16.18.126",

@@ -44,6 +44,9 @@ jobs:
       - name: Check
         working-directory: bluenote
         run: npm run check
+      - name: Version status
+        working-directory: bluenote
+        run: npm run version:status
       - name: Smoke help
         working-directory: bluenote
         run: node dist/bin.js --help

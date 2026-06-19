@@ -80,6 +80,10 @@ function isSemver(version) {
   ).test(version);
 }
 
+function isExactSemver(version) {
+  return isSemver(version);
+}
+
 function dependencyEntries(packageJson) {
   return [
     ...Object.entries(packageJson.dependencies || {}),
@@ -100,6 +104,19 @@ function validatePackage(definition, packageJson, packagePath, options) {
 
   if (!isSemver(packageJson.version || '')) {
     throw new Error(`${packagePath}: invalid semver version ${packageJson.version || '<missing>'}`);
+  }
+
+  const coreDependency = packageJson.dependencies?.['@lordierclaw/bluenote-core'];
+  if (
+    definition.expectedName !== '@lordierclaw/bluenote-core'
+    && typeof coreDependency === 'string'
+    && !isGitDependency(coreDependency)
+    && !isExactSemver(coreDependency)
+  ) {
+    throw new Error(
+      `${packagePath}: ${definition.expectedName} must use an exact semver core dependency in release mode: `
+        + `@lordierclaw/bluenote-core@${coreDependency}.`,
+    );
   }
 
   for (const [dependencyName, dependencyVersion] of dependencyEntries(packageJson)) {

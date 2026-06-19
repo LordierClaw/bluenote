@@ -86,12 +86,24 @@ function writeVersionStatusFixture(overrides = {}) {
       name: '@lordierclaw/bluenote',
       version: '0.1.0',
       dependencies: {
-        '@lordierclaw/bluenote-core': 'git+https://github.com/LordierClaw/bluenote-core.git#0123456789abcdef0123456789abcdef01234567',
+        '@lordierclaw/bluenote-core': '0.1.0',
       },
     },
     'bluenote-core': { name: '@lordierclaw/bluenote-core', version: '0.1.0' },
-    'bluenote-webui': { name: '@lordierclaw/bluenote-webui', version: '0.1.0' },
-    'bluenote-term': { name: '@lordierclaw/bluenote-term', version: '0.1.0' },
+    'bluenote-webui': {
+      name: '@lordierclaw/bluenote-webui',
+      version: '0.1.0',
+      dependencies: {
+        '@lordierclaw/bluenote-core': '0.1.0',
+      },
+    },
+    'bluenote-term': {
+      name: '@lordierclaw/bluenote-term',
+      version: '0.1.0',
+      dependencies: {
+        '@lordierclaw/bluenote-core': '0.1.0',
+      },
+    },
   };
 
   for (const [repoName, packageData] of Object.entries(packages)) {
@@ -228,7 +240,7 @@ function readSiblingReadmes() {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
-  assert.equal(packageJson.version, '0.1.0');
+  assert.equal(packageJson.version, '0.4.2');
   assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.version, packageJson.version);
@@ -239,7 +251,8 @@ async function testPackageMetadata() {
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
-  assert.match(packageJson.dependencies['@lordierclaw/bluenote-core'], /^git\+https:\/\/github\.com\/LordierClaw\/bluenote-core\.git#[0-9a-f]{40}$/);
+  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], '0.4.2');
+  assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], '0.4.2');
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
 }
@@ -248,8 +261,9 @@ async function testVersionStatusScript() {
   const workspaceRoot = writeVersionStatusFixture();
 
   const strictResult = runVersionStatus(['--workspace-root', workspaceRoot]);
-  assert.notEqual(strictResult.status, 0);
-  assert.match(strictResult.stderr, /Git dependency is not allowed in release mode/);
+  assert.equal(strictResult.status, 0, strictResult.stderr);
+  assert.match(strictResult.stdout, /BlueNote package versions/);
+  assert.equal(strictResult.stderr, '');
 
   const result = runVersionStatus(['--workspace-root', workspaceRoot, '--allow-git-deps']);
   assert.equal(result.status, 0, result.stderr);
@@ -262,6 +276,44 @@ async function testVersionStatusScript() {
 }
 
 async function testVersionStatusScriptFailures() {
+  for (const [repoName, packagePath] of Object.entries({
+    bluenote: 'bluenote/package.json',
+    'bluenote-webui': 'bluenote-webui/package.json',
+    'bluenote-term': 'bluenote-term/packages/term/package.json',
+  })) {
+    const gitDepRoot = writeVersionStatusFixture({
+      [repoName]: {
+        dependencies: {
+          '@lordierclaw/bluenote-core': 'git+https://github.com/LordierClaw/bluenote-core.git#0123456789abcdef0123456789abcdef01234567',
+        },
+      },
+    });
+    const gitDep = runVersionStatus(['--workspace-root', gitDepRoot]);
+    assert.notEqual(gitDep.status, 0);
+    assert.match(gitDep.stderr, new RegExp(escapeRegExp(packagePath)));
+    assert.match(gitDep.stderr, /Git dependency is not allowed in release mode/);
+
+    const gitDepAllowed = runVersionStatus(['--workspace-root', gitDepRoot, '--allow-git-deps']);
+    assert.equal(gitDepAllowed.status, 0, gitDepAllowed.stderr);
+
+    const rangeDepRoot = writeVersionStatusFixture({
+      [repoName]: {
+        dependencies: {
+          '@lordierclaw/bluenote-core': '^0.1.0',
+        },
+      },
+    });
+    const rangeDep = runVersionStatus(['--workspace-root', rangeDepRoot]);
+    assert.notEqual(rangeDep.status, 0);
+    assert.match(rangeDep.stderr, new RegExp(escapeRegExp(packagePath)));
+    assert.match(rangeDep.stderr, /must use an exact semver core dependency in release mode/);
+
+    const rangeDepAllowed = runVersionStatus(['--workspace-root', rangeDepRoot, '--allow-git-deps']);
+    assert.notEqual(rangeDepAllowed.status, 0);
+    assert.match(rangeDepAllowed.stderr, new RegExp(escapeRegExp(packagePath)));
+    assert.match(rangeDepAllowed.stderr, /must use an exact semver core dependency in release mode/);
+  }
+
   const badNameRoot = writeVersionStatusFixture({
     'bluenote-webui': { name: 'bluenote-webui' },
   });
@@ -481,7 +533,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedRun.status, 0);
-  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.2/i);
 
   const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
     env: {
@@ -492,7 +544,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedTermRun.status, 0);
-  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.2/i);
 
   const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
     env: {
@@ -503,7 +555,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
-  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.1\.0/i);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.2/i);
 
   const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
   const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
@@ -517,7 +569,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(outOfRepoVersionRun.status, 0);
-  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.1\.0/i);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.2/i);
 
   const partialConfigHome = makeTempDir('installer-partial-config-home');
   fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });
@@ -1086,6 +1138,37 @@ async function testDoctorReportsBrokenClients() {
   assert.match(found.stdout, /version: unavailable/);
 }
 
+async function testDoctorReportsHandshakeFailureWithoutMarkingClientBroken() {
+  const tempBin = makeTempDir('doctor-handshake-failure');
+  const webPath = path.join(tempBin, 'bluenote-webui.CMD');
+  writeExecutable(webPath);
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    const found = await runCli(['doctor'], {
+      nodeVersion: '18.19.0',
+      platform: 'win32',
+      env: { ...env, PATH: tempBin, PATHEXT: '.COM;.EXE;.BAT;.CMD' },
+      spawnSync(command, args, options) {
+        calls.push({ command, args, options });
+        if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+        if (args.includes('--version')) return { status: 0, stdout: '0.4.2\n', stderr: '' };
+        if (args.includes('--check-daemon')) return { status: 1, stdout: '', stderr: 'handshake failed' };
+        return { status: 1, stdout: '', stderr: 'unexpected' };
+      },
+    });
+    assert.equal(found.code, 0);
+    assert.match(found.stdout, /bluenote-webui: path/);
+    assert.match(found.stdout, /daemon handshake: failed/);
+    assert.equal(calls.some((call) => call.command === webPath && call.options.shell === true), true);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function testUnknownCommand() {
   const result = await runCli(['nope']);
   assert.equal(result.code, 1);
@@ -1469,6 +1552,7 @@ const tests = [
   testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,
   testDoctorReportsBrokenClients,
+  testDoctorReportsHandshakeFailureWithoutMarkingClientBroken,
   testDoctorReportsClientRuntimeModes,
   testUnknownCommand,
   testDaemonLifecycle,
