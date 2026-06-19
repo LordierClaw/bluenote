@@ -133,6 +133,7 @@ jobs:
           CORE_TARBALL=$(node -e "const output=require('./bluenote-core/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
           WEBUI_TARBALL=$(node -e "const output=require('./bluenote-webui/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
           TERM_TARBALL=$(node -e "const output=require('./bluenote-term/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          export CORE_TARBALL WEBUI_TARBALL TERM_TARBALL
           docker run --rm \
             -e CORE_TARBALL \
             -e WEBUI_TARBALL \
