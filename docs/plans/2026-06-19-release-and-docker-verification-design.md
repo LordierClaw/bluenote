@@ -1,4 +1,4 @@
-# BlueNote 0.4.2 release patch and GitHub release design
+# BlueNote 0.4.3 release patch and GitHub release design
 
 Date: 2026-06-19
 Status: Approved design
@@ -10,11 +10,11 @@ Related repos:
 
 ## Goal
 
-Ship the next aligned BlueNote patch release across all publishable packages, verify the release candidate in a fresh Docker Node 22 environment using packed local tarballs and ordinary user commands, publish only after that gate passes, and create GitHub releases in every publishable repo through repo-owned automation.
+Ship the next aligned BlueNote patch release across all publishable packages, verify the release candidate in a fresh Docker Node 22 environment using packed local tarballs and ordinary user commands, publish only after that gate passes, and create GitHub releases in every publishable repo through repo-owned automation. This revision supersedes the earlier `0.4.2` target because `0.4.2` is already published and released; the remaining workflow fixes must ship under a new coordinated patch tag.
 
 ## User-approved decisions
 
-- Target release version: `0.4.2` (planning assumption used for this revision unless explicitly changed later)
+- Target release version: `0.4.3`
 - Docker verification happens before publish.
 - Verification uses packed local tarballs for all clients.
 - If Docker install and normal command verification pass, proceed to publish in this session.
@@ -25,7 +25,7 @@ Ship the next aligned BlueNote patch release across all publishable packages, ve
 
 ## Non-goals
 
-- Major product redesign beyond what is required for a clean `0.4.2` release.
+- Major product redesign beyond what is required for a clean `0.4.3` release.
 - Broad historical-doc cleanup outside current-facing release/readme surfaces.
 - Full manual Windows runtime proof in this session.
 - New public design/phase doc sprawl.
@@ -33,7 +33,8 @@ Ship the next aligned BlueNote patch release across all publishable packages, ve
 ## Current state summary
 
 Live state rechecked during this revision:
-- npm registry already has `0.4.1` for `@lordierclaw/bluenote`, `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`
+- npm registry already has `0.4.2` for `@lordierclaw/bluenote`, `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`
+- `v0.4.2` GitHub releases already exist in all four publishable repos
 - `bluenote` has a verified fix for the false `bluenote-webui: broken` doctor classification when the optional daemon handshake check fails
 - workflow surfaces already exist in all repos:
   - `bluenote/.github/workflows/check.yml`
@@ -42,12 +43,12 @@ Live state rechecked during this revision:
   - `bluenote-term/.github/workflows/ci.yml`
   - `bluenote-term/.github/workflows/release.yml`
 
-That means this is a true next patch release, not a re-publish of `0.4.1`, and release automation should start from the existing workflow layout rather than a greenfield assumption.
+That means this is now a true next patch release after `0.4.2`, not a re-publish of `0.4.2`, and release automation should start from the existing workflow layout rather than a greenfield assumption.
 
 ## Release strategy
 
 Use one coordinated patch-release flow:
-1. land and verify the `bluenote` doctor/WebUI fix as part of the `0.4.2` release candidate
+1. land and verify the `bluenote` doctor/WebUI fix plus release-workflow hardening as part of the `0.4.3` release candidate
 2. align versions across all four publishable packages
 3. ensure release manifests use exact semver core dependencies where required
 4. run repo-local checks and pack dry-runs in every touched repo
@@ -65,7 +66,7 @@ Owns:
 - repo-local CI/release workflow for its own package
 
 Expected changes:
-- bump to `0.4.2`
+- bump to `0.4.3`
 - pack/check verification
 - README release wording only if needed
 - add or align a repo-owned release workflow if missing or inconsistent
@@ -77,8 +78,8 @@ Owns:
 - repo-local CI/release workflow for its own package and GitHub release
 
 Expected changes:
-- bump to `0.4.2`
-- exact semver dependency on `@lordierclaw/bluenote-core@0.4.2`
+- bump to `0.4.3`
+- exact semver dependency on `@lordierclaw/bluenote-core@0.4.3`
 - pack/check verification
 - README release/install wording only if needed
 - fix workflow drift if current workflow still targets stale branch/setup assumptions
@@ -91,8 +92,8 @@ Owns:
 - existing release workflow that must be inspected and aligned to current package/release needs
 
 Expected changes:
-- bump to `0.4.2`
-- exact semver dependency on `@lordierclaw/bluenote-core@0.4.2`
+- bump to `0.4.3`
+- exact semver dependency on `@lordierclaw/bluenote-core@0.4.3`
 - publish-shape verification
 - README release/install wording only if needed
 - align existing `release.yml` with the real current release contract
@@ -107,8 +108,8 @@ Owns:
 
 Expected changes:
 - keep/verify the doctor handshake classification fix
-- bump to `0.4.2`
-- exact semver dependency on `@lordierclaw/bluenote-core@0.4.2`
+- bump to `0.4.3`
+- exact semver dependency on `@lordierclaw/bluenote-core@0.4.3`
 - tighten release validation and smoke verification where needed
 - README release/install wording alignment
 - workflow updates for release automation and Docker release verification
@@ -116,7 +117,7 @@ Expected changes:
 
 ## Verification contract
 
-A `0.4.2` candidate is acceptable only if all of the following pass.
+A `0.4.3` candidate is acceptable only if all of the following pass.
 
 ### 1. Repo-local gates
 - `bluenote-core`: `npm run check` and `npm pack --dry-run --json`
@@ -136,7 +137,7 @@ Inside a fresh container, install local tarballs in dependency order and prove a
 - the doctor fix reports handshake failure as a diagnostic, not a false broken install, when applicable
 
 ### 3. Release integrity
-- all package manifests are `0.4.2`
+- all package manifests are `0.4.3`
 - no released manifest keeps a Git-pinned core dependency
 - no secrets are printed in doctor/log/release output
 - workflow automation matches the real release contract of each repo
@@ -175,12 +176,12 @@ Then create/verify GitHub releases in the same repo order if the workflow design
 1. `bluenote-term` already has a `release.yml`; it may reflect an older asset contract and must be reconciled rather than assumed correct.
 2. `bluenote-webui` workflow drift is likely because its check workflow still references a non-main core ref.
 3. Docker verification can expose install/runtime gaps not visible in sibling-checkout development.
-4. The `0.4.2` assumption must be corrected everywhere if the user later picks a different version.
+4. The `0.4.3` assumption must be corrected everywhere if the user later picks a different version.
 
 ## Success criteria
 
 This release work is successful only if:
-- `0.4.2` is applied consistently across all publishable packages
+- `0.4.3` is applied consistently across all publishable packages
 - the doctor/WebUI false-broken report fix ships in the distribution release
 - all repo-local and Docker gates pass
 - npm publish completes in dependency order

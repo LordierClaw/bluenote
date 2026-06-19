@@ -246,7 +246,7 @@ function readReleaseWorkflow() {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
-  assert.equal(packageJson.version, '0.4.2');
+  assert.equal(packageJson.version, '0.4.3');
   assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.version, packageJson.version);
@@ -257,8 +257,8 @@ async function testPackageMetadata() {
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
-  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], '0.4.2');
-  assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], '0.4.2');
+  assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], '0.4.3');
+  assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], '0.4.3');
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
   assert.equal(packageJson.dependencies['bluenote-webui'], undefined);
 }
@@ -456,6 +456,16 @@ async function testReleaseWorkflowSiblingCheckoutContract() {
     workflow.includes('ln -s "$PWD/${repo}" "$target"'),
     'release workflow should link nested checkouts into the parent workspace expected by local-dev scripts',
   );
+  assert.match(
+    workflow,
+    /npm install -g\s+\\\s*"\/workspace\/bluenote-core\/\$\{CORE_TARBALL\}"\s+\\\s*"\/workspace\/bluenote-webui\/\$\{WEBUI_TARBALL\}"\s+\\\s*"\/workspace\/bluenote-term\/packages\/term\/\$\{TERM_TARBALL\}"\s+\\\s*"\/workspace\/\$\{PACKAGE_TARBALL\}"/m,
+    'release workflow should install all tarballs in one npm transaction so Docker verification can resolve unpublished sibling versions locally',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /npm install -g\s+"\/workspace\/bluenote-core\/\$\{CORE_TARBALL\}"\s*npm install -g\s+"\/workspace\/bluenote-webui\/\$\{WEBUI_TARBALL\}"/m,
+    'release workflow should not install sibling tarballs sequentially during Docker verification',
+  );
 }
 
 async function testInstallerPreflightContract() {
@@ -570,7 +580,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedRun.status, 0);
-  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.2/i);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.3/i);
 
   const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
     env: {
@@ -581,7 +591,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedTermRun.status, 0);
-  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.2/i);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.3/i);
 
   const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
     env: {
@@ -592,7 +602,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
-  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.2/i);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.3/i);
 
   const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
   const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
@@ -606,7 +616,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(outOfRepoVersionRun.status, 0);
-  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.2/i);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.3/i);
 
   const partialConfigHome = makeTempDir('installer-partial-config-home');
   fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });

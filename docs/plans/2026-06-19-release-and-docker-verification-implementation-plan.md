@@ -1,8 +1,8 @@
-# BlueNote 0.4.2 release patch Implementation Plan
+# BlueNote 0.4.3 release patch Implementation Plan
 
 > **For implementer:** Use TDD throughout where behavior is executable. Write failing tests first, watch them fail, implement minimally, then verify green. For workflow/doc-only tasks, use the smallest executable/contract gate available and verify against the real repo state.
 
-**Goal:** Ship a coordinated BlueNote `0.4.2` patch release that includes the doctor/WebUI false-broken fix, passes fresh Docker Node 22 tarball verification, publishes all four npm packages in dependency order, and creates GitHub releases in every publishable repo without adding plan-doc spam.
+**Goal:** Ship a coordinated BlueNote `0.4.3` patch release that includes the doctor/WebUI false-broken fix plus the post-`0.4.2` release-workflow hardening, passes fresh Docker Node 22 tarball verification, publishes all four npm packages in dependency order, and creates GitHub releases in every publishable repo without adding plan-doc spam.
 
 **Architecture:** Keep `bluenote` as the release-gate owner, but let each repo own its own package metadata, CI, and GitHub release workflow. Reuse existing workflow files where practical, align package versions/dependencies first, prove installability from local tarballs in Docker, then publish and verify GitHub releases.
 
@@ -18,13 +18,13 @@
   - `/root/code/bluenote-webui`
   - `/root/code/bluenote-term`
   - `/root/code/bluenote`
-- Assumed release version for this plan: `0.4.2`
+- Assumed release version for this plan: `0.4.3`
 - Do not publish until Docker verification is green.
 - Do not create additional release plan docs; update the canonical pair only.
 
 ---
 
-### Task 1: Reconcile release state, record `0.4.2`, and inspect workflow baselines
+### Task 1: Reconcile release state, record `0.4.3`, and inspect workflow baselines
 
 **Files:**
 - Modify: `/root/code/.agent/CURRENT_TASK.md`
@@ -39,7 +39,7 @@ Commands:
 - `npm view @lordierclaw/bluenote-term version`
 - `git -C <repo> status --short`
 - inspect existing workflow files in each repo
-Expected: confirm `0.4.1` is already published, `0.4.2` is the next patch target, and record which release/CI workflows already exist.
+Expected: confirm `0.4.2` is already published, `0.4.3` is the next patch target, and record which release/CI workflows already exist.
 
 **Step 2: Update task tracking**
 Record the active target version and revised scope in `.agent/CURRENT_TASK.md` and `.agent/STATUS.md`.
@@ -78,11 +78,11 @@ Command:
 Expected: PASS.
 
 **Step 5: Commit**
-`git -C /root/code/bluenote add src/commands/doctor.ts scripts/version-status.mjs tests/run-tests.js && git -C /root/code/bluenote commit -m "fix: tighten 0.4.2 release contract"`
+`git -C /root/code/bluenote add src/commands/doctor.ts scripts/version-status.mjs tests/run-tests.js && git -C /root/code/bluenote commit -m "fix: tighten 0.4.3 release contract"`
 
 ---
 
-### Task 3: Prepare `bluenote-core@0.4.2`
+### Task 3: Prepare `bluenote-core@0.4.3`
 
 **Files:**
 - Modify: `/root/code/bluenote-core/package.json`
@@ -98,7 +98,7 @@ Commands:
 Expected: healthy package, still at the pre-release version before edits.
 
 **Step 2: Write minimal implementation**
-- bump version to `0.4.2`
+- bump version to `0.4.3`
 - refresh lockfile only if required
 - align README release wording only if needed
 - add or align repo-owned release workflow for npm publish + GitHub release if missing/incomplete
@@ -107,14 +107,14 @@ Expected: healthy package, still at the pre-release version before edits.
 Commands:
 - `npm -C /root/code/bluenote-core run check`
 - `npm -C /root/code/bluenote-core pack --dry-run --json`
-Expected: PASS with `0.4.2` reflected in pack metadata.
+Expected: PASS with `0.4.3` reflected in pack metadata.
 
 **Step 4: Commit**
-`git -C /root/code/bluenote-core add package.json package-lock.json README.md .github/workflows && git -C /root/code/bluenote-core commit -m "chore: prepare bluenote-core 0.4.2"`
+`git -C /root/code/bluenote-core add package.json package-lock.json README.md .github/workflows && git -C /root/code/bluenote-core commit -m "chore: prepare bluenote-core 0.4.3"`
 
 ---
 
-### Task 4: Prepare `bluenote-webui@0.4.2` and repair workflow drift
+### Task 4: Prepare `bluenote-webui@0.4.3` and repair workflow drift
 
 **Files:**
 - Modify: `/root/code/bluenote-webui/package.json`
@@ -130,8 +130,8 @@ Commands:
 Expected: healthy package but still carrying old version/dependency/workflow assumptions.
 
 **Step 2: Write minimal implementation**
-- bump version to `0.4.2`
-- set `@lordierclaw/bluenote-core` dependency to exact `0.4.2`
+- bump version to `0.4.3`
+- set `@lordierclaw/bluenote-core` dependency to exact `0.4.3`
 - refresh lockfile only if required
 - align README release/install wording if needed
 - remove stale workflow branch/ref assumptions
@@ -144,11 +144,11 @@ Commands:
 Expected: PASS with correct semver dependency and workflow sanity.
 
 **Step 4: Commit**
-`git -C /root/code/bluenote-webui add package.json package-lock.json README.md .github/workflows && git -C /root/code/bluenote-webui commit -m "chore: prepare bluenote-webui 0.4.2"`
+`git -C /root/code/bluenote-webui add package.json package-lock.json README.md .github/workflows && git -C /root/code/bluenote-webui commit -m "chore: prepare bluenote-webui 0.4.3"`
 
 ---
 
-### Task 5: Prepare `bluenote-term@0.4.2` and align existing release workflow
+### Task 5: Prepare `bluenote-term@0.4.3` and align existing release workflow
 
 **Files:**
 - Modify: `/root/code/bluenote-term/packages/term/package.json`
@@ -164,8 +164,8 @@ Commands:
 Expected: healthy package, but old version/dependency/release-workflow assumptions still present before edits.
 
 **Step 2: Write minimal implementation**
-- bump term package version to `0.4.2`
-- set `@lordierclaw/bluenote-core` dependency to exact `0.4.2`
+- bump term package version to `0.4.3`
+- set `@lordierclaw/bluenote-core` dependency to exact `0.4.3`
 - make only minimal README/package changes needed for a real release path
 - reconcile existing `release.yml` with the actual current package and asset contract
 
@@ -176,11 +176,11 @@ Commands:
 Expected: PASS with correct semver dependency and publishable artifact shape.
 
 **Step 4: Commit**
-`git -C /root/code/bluenote-term add packages/term/package.json README.md packages/term/README.md .github/workflows && git -C /root/code/bluenote-term commit -m "chore: prepare bluenote-term 0.4.2"`
+`git -C /root/code/bluenote-term add packages/term/package.json README.md packages/term/README.md .github/workflows && git -C /root/code/bluenote-term commit -m "chore: prepare bluenote-term 0.4.3"`
 
 ---
 
-### Task 6: Prepare `bluenote@0.4.2`, README alignment, and release automation
+### Task 6: Prepare `bluenote@0.4.3`, README alignment, and release automation
 
 **Files:**
 - Modify: `/root/code/bluenote/package.json`
@@ -196,8 +196,8 @@ Commands:
 Expected: pre-change baseline still references the old version/dependency/doc/release setup.
 
 **Step 2: Write minimal implementation**
-- bump distribution version to `0.4.2`
-- set `@lordierclaw/bluenote-core` dependency to exact `0.4.2`
+- bump distribution version to `0.4.3`
+- set `@lordierclaw/bluenote-core` dependency to exact `0.4.3`
 - refresh lockfile only if required
 - align README install/release wording
 - add/align distribution release workflow so GitHub release automation exists and does not bypass Docker verification
@@ -210,7 +210,7 @@ Commands:
 Expected: PASS.
 
 **Step 4: Commit**
-`git -C /root/code/bluenote add package.json package-lock.json README.md .github/workflows src/commands/doctor.ts scripts/version-status.mjs tests/run-tests.js && git -C /root/code/bluenote commit -m "chore: prepare bluenote 0.4.2"`
+`git -C /root/code/bluenote add package.json package-lock.json README.md .github/workflows src/commands/doctor.ts scripts/version-status.mjs tests/run-tests.js && git -C /root/code/bluenote commit -m "chore: prepare bluenote 0.4.3"`
 
 ---
 
@@ -344,7 +344,7 @@ Include npm versions, GitHub release URLs, verification commands, and any follow
 ## Final verification checklist
 
 Before declaring success:
-- [ ] `0.4.2` applied consistently across all four packages
+- [ ] `0.4.3` applied consistently across all four packages
 - [ ] doctor/WebUI false-broken fix verified in the distribution release candidate
 - [ ] no release manifest still references Git-pinned core dependencies
 - [ ] all repo-local checks passed

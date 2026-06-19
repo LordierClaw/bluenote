@@ -143,10 +143,11 @@ jobs:
             -w /workspace \
             node:22-bookworm \
             bash -lc 'set -euo pipefail
-              npm install -g "/workspace/bluenote-core/${CORE_TARBALL}"
-              npm install -g "/workspace/bluenote-webui/${WEBUI_TARBALL}"
-              npm install -g "/workspace/bluenote-term/packages/term/${TERM_TARBALL}"
-              npm install -g "/workspace/${PACKAGE_TARBALL}"
+              npm install -g \
+                "/workspace/bluenote-core/${CORE_TARBALL}" \
+                "/workspace/bluenote-webui/${WEBUI_TARBALL}" \
+                "/workspace/bluenote-term/packages/term/${TERM_TARBALL}" \
+                "/workspace/${PACKAGE_TARBALL}"
               bluenote --help >/tmp/bluenote-help.txt
               bluenote version
               bluenote doctor
