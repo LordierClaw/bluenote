@@ -114,15 +114,15 @@ jobs:
           set -euo pipefail
           npm -C bluenote-core ci --include=dev
           npm -C bluenote-core run check
-          (cd bluenote-core && npm pack --json > pack-output.json)
+          (cd bluenote-core && npm pack >/dev/null)
 
           npm -C bluenote-webui ci --include=dev
           npm -C bluenote-webui run check
-          (cd bluenote-webui && npm pack --json > pack-output.json)
+          (cd bluenote-webui && npm pack >/dev/null)
 
           (cd bluenote-term && bun install --frozen-lockfile)
           (cd bluenote-term && bun run check)
-          (cd bluenote-term/packages/term && npm pack --json > ../../pack-output.json)
+          (cd bluenote-term/packages/term && npm pack >/dev/null)
 
       - name: Docker Node 22 coordinated tarball smoke verification
         shell: bash
@@ -130,9 +130,9 @@ jobs:
           PACKAGE_TARBALL: ${{ steps.pack.outputs.package_tarball }}
         run: |
           set -euo pipefail
-          CORE_TARBALL=$(node -e "const output=require('./bluenote-core/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
-          WEBUI_TARBALL=$(node -e "const output=require('./bluenote-webui/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
-          TERM_TARBALL=$(node -e "const output=require('./bluenote-term/pack-output.json'); const value=Array.isArray(output) ? output[0]?.filename : output?.filename; if (!value) process.exit(1); process.stdout.write(value)")
+          CORE_TARBALL=$(node -e "const pkg=require('./bluenote-core/package.json'); process.stdout.write(pkg.name.replace(/^@/, '').replace(/\//g, '-') + '-' + pkg.version + '.tgz')")
+          WEBUI_TARBALL=$(node -e "const pkg=require('./bluenote-webui/package.json'); process.stdout.write(pkg.name.replace(/^@/, '').replace(/\//g, '-') + '-' + pkg.version + '.tgz')")
+          TERM_TARBALL=$(node -e "const pkg=require('./bluenote-term/packages/term/package.json'); process.stdout.write(pkg.name.replace(/^@/, '').replace(/\//g, '-') + '-' + pkg.version + '.tgz')")
           export CORE_TARBALL WEBUI_TARBALL TERM_TARBALL
           docker run --rm \
             -e CORE_TARBALL \
