@@ -238,6 +238,12 @@ function readSiblingReadmes() {
   return readWorkspaceReadmes();
 }
 
+function readReleaseWorkflow() {
+  const workflowPath = path.join(__dirname, '..', '.github', 'workflows', 'release.yml');
+  assert.ok(fs.existsSync(workflowPath), 'missing release workflow');
+  return fs.readFileSync(workflowPath, 'utf8');
+}
+
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
   assert.equal(packageJson.version, '0.4.2');
@@ -419,6 +425,37 @@ async function testDevLocalScriptsContract() {
   assert.match(uninstallDryRun.stdout, /npm unlink -g @lordierclaw\/bluenote-webui/);
   assert.match(uninstallDryRun.stdout, /cd .*bluenote-term\/packages\/term(?:\s|$).*bun unlink(?:\s|$)/);
   assert.doesNotMatch(uninstallDryRun.stdout, /bun unlink @lordierclaw\/bluenote-term/);
+}
+
+async function testReleaseWorkflowSiblingCheckoutContract() {
+  const workflow = readReleaseWorkflow();
+
+  for (const repo of ['bluenote-core', 'bluenote-webui', 'bluenote-term']) {
+    assert.match(
+      workflow,
+      new RegExp(`Checkout ${escapeRegExp(repo)} release sibling`, 'm'),
+      `release workflow should checkout ${repo}`,
+    );
+    assert.match(
+      workflow,
+      new RegExp(`path:\\s+${escapeRegExp(repo)}`, 'm'),
+      `release workflow should place ${repo} in a predictable checkout path`,
+    );
+    assert.match(
+      workflow,
+      new RegExp(`for repo in [^\n]*${escapeRegExp(repo)}`, 'm'),
+      `release workflow should normalize ${repo} into the parent workspace contract`,
+    );
+  }
+
+  assert.ok(
+    workflow.includes('target="../${repo}"'),
+    'release workflow should expose ../<repo> paths for local sibling-path contract tests',
+  );
+  assert.ok(
+    workflow.includes('ln -s "$PWD/${repo}" "$target"'),
+    'release workflow should link nested checkouts into the parent workspace expected by local-dev scripts',
+  );
 }
 
 async function testInstallerPreflightContract() {
@@ -1543,6 +1580,7 @@ const tests = [
   testVersionStatusScriptFailures,
   testReadmeStructureContract,
   testDevLocalScriptsContract,
+  testReleaseWorkflowSiblingCheckoutContract,
   testInstallerPreflightContract,
   testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,

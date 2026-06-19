@@ -57,6 +57,17 @@ jobs:
         with:
           bun-version: 1.1.38
 
+      - name: Normalize sibling checkout layout for release-contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in bluenote-core bluenote-webui bluenote-term; do
+            target="../${repo}"
+            if [ ! -e "$target" ]; then
+              ln -s "$PWD/${repo}" "$target"
+            fi
+          done
+
       - name: Install dependencies
         run: npm ci --include=dev
 
