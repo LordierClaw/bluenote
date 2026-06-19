@@ -847,6 +847,16 @@ async function testDevVerifyLocalScriptsContract() {
   const verifySh = readScript('scripts/dev-verify-local.sh');
   const verifyPs = readScript('scripts/dev-verify-local.ps1');
 
+  const workspaceRoot = path.resolve(__dirname, '..', '..');
+  const requiredSiblingPaths = [
+    path.join(workspaceRoot, 'bluenote-core', 'package.json'),
+    path.join(workspaceRoot, 'bluenote-webui', 'package.json'),
+  ];
+  if (requiredSiblingPaths.some((requiredPath) => !fs.existsSync(requiredPath))) {
+    process.stdout.write('SKIP dev verify local scripts contract: missing sibling checkout for bluenote-core or bluenote-webui\n');
+    return;
+  }
+
   assert.match(verifySh, /set -euo pipefail/);
   assert.match(verifySh, /--dry-run/);
   assert.match(verifySh, /--keep-temp/);
