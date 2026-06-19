@@ -114,11 +114,11 @@ jobs:
           set -euo pipefail
           npm -C bluenote-core ci --include=dev
           npm -C bluenote-core run check
-          npm -C bluenote-core pack --json > bluenote-core/pack-output.json
+          (cd bluenote-core && npm pack --json > pack-output.json)
 
           npm -C bluenote-webui ci --include=dev
           npm -C bluenote-webui run check
-          npm -C bluenote-webui pack --json > bluenote-webui/pack-output.json
+          (cd bluenote-webui && npm pack --json > pack-output.json)
 
           (cd bluenote-term && bun install --frozen-lockfile)
           (cd bluenote-term && bun run check)
