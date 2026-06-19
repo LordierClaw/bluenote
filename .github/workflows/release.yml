@@ -120,8 +120,8 @@ jobs:
           npm -C bluenote-webui run check
           npm -C bluenote-webui pack --json > bluenote-webui/pack-output.json
 
-          bun -C bluenote-term install
-          bun -C bluenote-term run check
+          (cd bluenote-term && bun install)
+          (cd bluenote-term && bun run check)
           (cd bluenote-term/packages/term && npm pack --json > ../../pack-output.json)
 
       - name: Docker Node 22 coordinated tarball smoke verification
