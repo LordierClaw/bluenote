@@ -1026,6 +1026,86 @@ async function testHelpDoesNotLoadClients() {
   assert.equal(result.stderr, '');
 }
 
+async function testDistributionHelpDocumentsNoteCommands() {
+  const result = await runCli(['--help']);
+  assert.equal(result.code, 0);
+  for (const command of ['init', 'new', 'list', 'show', 'search', 'edit', 'archive', 'delete', 'rebuild', 'ai', 'tui', 'term', 'web', 'daemon', 'doctor', 'version']) {
+    assert.match(result.stdout, new RegExp(`^  ${command}\\b`, 'm'), `help should document ${command} as a command row`);
+  }
+  assert.doesNotMatch(result.stdout, /^\s+Options: .*--clipboard/m);
+
+  const newHelp = await runCli(['new', '--help']);
+  assert.equal(newHelp.code, 0);
+  assert.match(newHelp.stdout, /^  bluenote new \[--title <title>\] \[--path note\/<folder>\] <body>$/m);
+  assert.doesNotMatch(newHelp.stdout, /--clipboard/);
+}
+
+async function testDistributionAiLightweightCommands() {
+  const root = makeTempDir('distribution-ai-commands');
+  const env = { ...process.env, BLUENOTE_ROOT: root };
+  const run = (args) => runCli(args, { env });
+
+  try {
+    const help = await run(['ai', '--help']);
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /Opt-in AI description generation/);
+    assert.match(help.stdout, /bluenote ai config set/);
+
+    const init = await run(['init']);
+    assert.equal(init.code, 0, init.stderr);
+
+    const invalidProvider = await run(['ai', 'config', 'set', '--provider', 'mystery', '--model', 'model']);
+    assert.equal(invalidProvider.code, 1);
+    assert.match(invalidProvider.stderr, /Invalid AI provider/);
+    assert.match(invalidProvider.stderr, /openai-compatible.*codex/);
+
+    const saved = await run(['ai', 'config', 'set', '--base-url', 'https://example.invalid/v1', '--api-key', 'sk-test-secret-value', '--model', 'test-model']);
+    assert.equal(saved.code, 0, saved.stderr);
+    assert.match(saved.stdout, /AI config saved/);
+    assert.match(saved.stdout, /plaintext/i);
+
+    const shown = await run(['ai', 'config', 'show']);
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.match(shown.stdout, /provider: openai-compatible/);
+    assert.match(shown.stdout, /model: test-model/);
+    assert.doesNotMatch(shown.stdout, /sk-test-secret-value/);
+    assert.match(shown.stdout, /apiKey: .+/);
+
+    const queue = await run(['ai', 'queue']);
+    assert.equal(queue.code, 0, queue.stderr);
+    assert.equal(queue.stdout, 'Pending AI jobs: 0\n');
+
+    const localProvider = await run(['ai', 'config', 'set', '--base-url', 'http://127.0.0.1:1/v1', '--api-key', 'sk-pro...alue', '--model', 'test-model']);
+    assert.equal(localProvider.code, 0, localProvider.stderr);
+    const note = await run(['new', '--path', 'note', '--title', 'AI Probe', 'AI probe body']);
+    assert.equal(note.code, 0, note.stderr);
+    const noteKey = note.stdout.match(/^Created note\nKey: ([^\n]+)/)?.[1];
+    assert.ok(noteKey, note.stdout);
+
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = undefined;
+      const describe = await run(['ai', 'describe', noteKey]);
+      assert.equal(describe.code, 1);
+      assert.match(describe.stderr, /AI provider request failed/);
+      assert.doesNotMatch(describe.stderr, /fetch is not defined/);
+      assert.doesNotMatch(describe.stderr, /sk-pro...alue/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testDistributionReadmeDocumentsNormalNoteCli() {
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.match(readme, /bluenote`? is the normal note-management CLI/i);
+  assert.match(readme, /bluenote new\b/);
+  assert.match(readme, /bluenote list\b/);
+  assert.match(readme, /bluenote tui\b/);
+}
+
 async function testVersionDoesNotLoadClients() {
   const result = await runCli(['version'], {
     clientLoader() {
@@ -1060,6 +1140,120 @@ async function testDoctorDoesNotLoadClients() {
   assert.match(result.stdout, /Clients/);
   assert.match(result.stdout, /Config/);
   assert.match(result.stdout, /Bun for source TUI: available/);
+}
+
+async function testDistributionNoteCommands() {
+  const root = makeTempDir('distribution-note-commands');
+  const env = { ...process.env, BLUENOTE_ROOT: root };
+  const run = (args) => runCli(args, { env });
+
+  try {
+    const init = await run(['init']);
+    assert.equal(init.code, 0, init.stderr);
+    assert.match(init.stdout, new RegExp(`Initialized BlueNote root: ${escapeRegExp(root)}`));
+
+    const created = await run(['new', '--path', 'note', '--title', 'Workflow Alpha', 'Alpha normal body']);
+    assert.equal(created.code, 0, created.stderr);
+    const normalMatch = created.stdout.match(/^Created note\nKey: ([^\n]+)\nPath: (note\/[^\n]+\.md)\n$/);
+    assert.ok(normalMatch, created.stdout);
+    const normalKey = normalMatch[1];
+    const normalPath = normalMatch[2];
+
+    const draft = await run(['new', 'Draft body']);
+    assert.equal(draft.code, 0, draft.stderr);
+    const draftMatch = draft.stdout.match(/^Created note\nKey: ([^\n]+)\nPath: (draft\/[^\n]+\.md)\n$/);
+    assert.ok(draftMatch, draft.stdout);
+    const draftKey = draftMatch[1];
+
+    const deleteActive = await run(['new', '--path', 'note', '--title', 'Delete Beta', 'Beta active delete body']);
+    assert.equal(deleteActive.code, 0, deleteActive.stderr);
+    const deleteActiveMatch = deleteActive.stdout.match(/^Created note\nKey: ([^\n]+)\nPath: (note\/[^\n]+\.md)\n$/);
+    assert.ok(deleteActiveMatch, deleteActive.stdout);
+    const deleteActiveKey = deleteActiveMatch[1];
+
+    const list = await run(['list']);
+    assert.equal(list.code, 0, list.stderr);
+    assert.match(list.stdout, /Workflow Alpha\t/);
+    assert.match(list.stdout, new RegExp(escapeRegExp(normalKey)));
+    assert.doesNotMatch(list.stdout, /Draft body/);
+    assert.doesNotMatch(list.stdout, new RegExp(escapeRegExp(draftKey)));
+
+    const drafts = await run(['list', '--drafts']);
+    assert.equal(drafts.code, 0, drafts.stderr);
+    assert.match(drafts.stdout, new RegExp(`${escapeRegExp(draftKey)}\\tDraft body`));
+
+    const all = await run(['list', '--all']);
+    assert.equal(all.code, 0, all.stderr);
+    assert.match(all.stdout, new RegExp(`${escapeRegExp(normalKey)}\\tAlpha normal body`));
+    assert.match(all.stdout, new RegExp(`${escapeRegExp(draftKey)}\\tDraft body`));
+    assert.match(all.stdout, new RegExp(`${escapeRegExp(deleteActiveKey)}\\tBeta active delete body`));
+
+    const activeDelete = await run(['delete', deleteActiveKey, '--force']);
+    assert.equal(activeDelete.code, 0, activeDelete.stderr);
+    assert.match(activeDelete.stdout, /^Deleted note: note\//);
+
+    const afterActiveDelete = await run(['list', '--all']);
+    assert.equal(afterActiveDelete.code, 0, afterActiveDelete.stderr);
+    assert.doesNotMatch(afterActiveDelete.stdout, new RegExp(escapeRegExp(deleteActiveKey)));
+
+    const show = await run(['show', normalKey]);
+    assert.equal(show.code, 0, show.stderr);
+    assert.match(show.stdout, new RegExp(`Key: ${escapeRegExp(normalKey)}`));
+    assert.match(show.stdout, new RegExp(`Path: ${escapeRegExp(normalPath)}`));
+    assert.match(show.stdout, /Title: Workflow Alpha/);
+    assert.match(show.stdout, /Alpha normal body/);
+
+    const search = await run(['search', 'Alpha']);
+    assert.equal(search.code, 0, search.stderr);
+    assert.match(search.stdout, /Workflow Alpha/);
+    assert.match(search.stdout, new RegExp(escapeRegExp(normalKey)));
+
+    const editedBody = `${'Alpha normal body updated before unique body search token. '.repeat(4)}citrine excerpt token appears only in the edited body after the description window.\n`;
+    const editorScriptPath = path.join(root, 'fake-editor.js');
+    fs.writeFileSync(editorScriptPath, [
+      "const fs = require('fs');",
+      `fs.writeFileSync(process.argv[2], ${JSON.stringify(editedBody)});`,
+    ].join('\n'));
+    const edit = await runCli(['edit', normalKey], {
+      env: {
+        ...env,
+        EDITOR: `${JSON.stringify(process.execPath)} ${JSON.stringify(editorScriptPath)}`,
+      },
+    });
+    assert.equal(edit.code, 0, edit.stderr);
+    assert.match(edit.stdout, new RegExp(`^Edited note: ${escapeRegExp(normalPath)}\\n$`));
+    assert.equal(fs.readFileSync(path.join(root, normalPath), 'utf8'), editedBody);
+
+    const updatedSearch = await run(['search', 'citrine excerpt']);
+    assert.equal(updatedSearch.code, 0, updatedSearch.stderr);
+    assert.match(updatedSearch.stdout, /Workflow Alpha/);
+    assert.match(updatedSearch.stdout, new RegExp(escapeRegExp(normalKey)));
+    assert.match(updatedSearch.stdout, /match: content(?: line \d+)?/);
+    assert.match(updatedSearch.stdout, /excerpt:/);
+    assert.match(updatedSearch.stdout, /citrine excerpt token appears only in the edited body after the description window\./);
+
+    const hiddenDraftArchive = await run(['archive', draftKey]);
+    assert.equal(hiddenDraftArchive.code, 1);
+    assert.match(hiddenDraftArchive.stderr, /Could not find a note matching selector/);
+
+    const visibleDraftArchive = await run(['archive', '--drafts', draftKey]);
+    assert.equal(visibleDraftArchive.code, 1);
+    assert.match(visibleDraftArchive.stderr, /Cannot archive non-normal note/);
+
+    const archive = await run(['archive', normalKey]);
+    assert.equal(archive.code, 0, archive.stderr);
+    assert.match(archive.stdout, /^Archived note: note\//);
+
+    const del = await run(['delete', '--all', normalKey, '--force']);
+    assert.equal(del.code, 0, del.stderr);
+    assert.match(del.stdout, /^Deleted note: \.data\/archive\//);
+
+    const rebuild = await run(['rebuild']);
+    assert.equal(rebuild.code, 0, rebuild.stderr);
+    assert.match(rebuild.stdout, /^Rebuilt indexes for \d+ note\(s\)\./);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 async function testCommandDiscovery() {
@@ -1336,6 +1530,77 @@ async function testTermAlias() {
   const result = await runCli(['term']);
   assert.equal(result.code, 1);
   assert.match(result.stderr, /BlueNote daemon is not running/);
+}
+
+async function testTuiAndTermSpawnTerminalClient() {
+  const { root, env } = makeDaemonEnv();
+  const binDir = makeTempDir('fake-term-bin');
+  const termPath = path.join(binDir, 'bluenote-term');
+  writeExecutable(termPath);
+
+  const healthServer = http.createServer((request, response) => {
+    if (request.url === '/health') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    healthServer.once('error', reject);
+    healthServer.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = healthServer.address();
+    assert.ok(address && typeof address === 'object', 'fake daemon should listen on a TCP port');
+    const daemonUrl = `http://127.0.0.1:${address.port}`;
+    writeDaemonMetadata(env, {
+      pid: process.pid,
+      url: daemonUrl,
+      token: 'test-token-not-printed',
+      startedAt: new Date().toISOString(),
+      version: packageJson.version,
+    });
+
+    const spawned = [];
+    const spawnSyncCalls = [];
+    function fakeSpawn(command, args, options) {
+      spawned.push({ command, args, env: options.env });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    function fakeSpawnSync(command, args) {
+      spawnSyncCalls.push({ command, args });
+      return { status: 0, stdout: 'BlueNote packaged TUI runtime available.\n', stderr: '' };
+    }
+
+    const launchEnv = { ...env, PATH: `${binDir}${path.delimiter}${env.PATH || ''}`, BLUENOTE_CLIENT_MODE: 'path' };
+    const tui = await runCli(['tui'], { env: launchEnv, spawn: fakeSpawn, spawnSync: fakeSpawnSync });
+    assert.equal(tui.code, 0, tui.stderr);
+    const term = await runCli(['term', '--probe-only-test'], { env: launchEnv, spawn: fakeSpawn, spawnSync: fakeSpawnSync });
+    assert.equal(term.code, 0, term.stderr);
+
+    assert.equal(spawned.length, 2);
+    assert.equal(spawned[0].command, termPath);
+    assert.deepEqual(spawned[0].args, []);
+    assert.equal(spawned[0].env.BLUENOTE_DAEMON_URL, daemonUrl);
+    assert.equal(spawned[0].env.BLUENOTE_DAEMON_TOKEN, 'test-token-not-printed');
+    assert.equal(spawned[1].command, termPath);
+    assert.deepEqual(spawned[1].args, ['--probe-only-test']);
+    assert.equal(spawned[1].env.BLUENOTE_DAEMON_URL, daemonUrl);
+    assert.equal(spawned[1].env.BLUENOTE_DAEMON_TOKEN, 'test-token-not-printed');
+    assert.deepEqual(spawnSyncCalls, [], 'path-mode TUI launch should not run terminal help or any spawnSync fallback');
+    assert.equal(spawned.some((call) => call.args.includes('tui') || call.args.includes('term') || call.args.includes('--help')), false);
+    assert.doesNotMatch(tui.stdout + tui.stderr + term.stdout + term.stderr, /test-token-not-printed/);
+  } finally {
+    await new Promise((resolve) => healthServer.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
+  }
 }
 
 async function testDaemonLifecycle() {
@@ -1762,8 +2027,12 @@ const tests = [
   testInstallerPreflightContract,
   testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,
+  testDistributionHelpDocumentsNoteCommands,
+  testDistributionAiLightweightCommands,
+  testDistributionReadmeDocumentsNormalNoteCli,
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
+  testDistributionNoteCommands,
   testCommandDiscovery,
   testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,
@@ -1772,6 +2041,7 @@ const tests = [
   testDoctorReportsClientRuntimeModes,
   testUnknownCommand,
   testTermAlias,
+  testTuiAndTermSpawnTerminalClient,
   testDaemonLifecycle,
   testDaemonStartDoesNotExposeTokenInArgv,
   testStaleDaemonMetadata,

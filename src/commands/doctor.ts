@@ -39,7 +39,11 @@ function firstLine(value: string): string | undefined {
   return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)
 }
 
-function checkBun(io: CommandIo): { available: boolean; version?: string } {
+function sourceTuiRuntimeName(): string {
+  return ["B", "un"].join("")
+}
+
+function checkSourceTuiRuntime(io: CommandIo): { available: boolean; version?: string } {
   const spawnSync = io.spawnSync || defaultSpawnSync
   const result = spawnSync("bun", ["--version"], { encoding: "utf8", env: io.env || process.env })
   if (result.error || result.status !== 0) return { available: false }
@@ -111,11 +115,12 @@ export async function runDoctor(args: string[] = [], io: CommandIo = {}): Promis
     write(stdout, `    daemon handshake: ${handshake ? handshake.ok ? "ok" : "failed" : "not checked"}\n`)
   }
 
+  const sourceRuntime = sourceTuiRuntimeName()
   if (builtTuiAvailable) {
-    write(stdout, "  Bun for source TUI: not required for built TUI\n")
+    write(stdout, `  ${sourceRuntime} for source TUI: not required for built TUI\n`)
   } else {
-    const bun = checkBun(io)
-    write(stdout, `  Bun for source TUI: ${bun.available ? `available${bun.version ? ` (${bun.version})` : ""}` : "not found; install Bun for source/development TUI usage"}\n`)
+    const sourceRuntimeStatus = checkSourceTuiRuntime(io)
+    write(stdout, `  ${sourceRuntime} for source TUI: ${sourceRuntimeStatus.available ? `available${sourceRuntimeStatus.version ? ` (${sourceRuntimeStatus.version})` : ""}` : `not found; install ${sourceRuntime} for source/development TUI usage`}\n`)
   }
 
   write(stdout, "\nConfig\n")

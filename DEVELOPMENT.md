@@ -118,12 +118,21 @@ npm run check
 
 ## Implemented command surface
 
-- `bluenote --help`: top-level help for `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
+- `bluenote --help`: top-level help for note-management commands, `tui`, `web`, `daemon`, `doctor`, and `version`; no heavy client imports.
+- `bluenote init`: initialize the managed BlueNote root.
+- `bluenote new [--title <title>] [--path note/<folder>] <body>`: create a draft or normal note through public core APIs.
+- `bluenote list [--drafts|--all]`: list notes, normal notes by default.
+- `bluenote show [--drafts|--all] <key|path>`: print a note summary and body.
+- `bluenote search [--drafts|--all] <query>`: search indexed notes.
+- `bluenote edit [--drafts|--all] <key|path>`: edit a note with `$EDITOR`.
+- `bluenote archive [--drafts|--all] <key|path>`: archive a normal note.
+- `bluenote delete [--drafts|--all] <key|path> --force`: permanently delete a selected note.
+- `bluenote rebuild`: rebuild derived note metadata and search indexes.
 - `bluenote version`: distribution version plus required runtime package metadata; no heavy client imports.
 - `bluenote doctor`: platform, Node compatibility, daemon status, optional `bluenote-webui`/`bluenote-term` PATH discovery, and Bun availability; no secrets or workspace mutation.
 - `bluenote daemon start|status|stop`: minimal local-only HTTP daemon lifecycle with `/health` and `/capabilities`; tokens are stored in daemon metadata but never printed.
-- `bluenote web [...args]`: requires daemon metadata, discovers the public `bluenote-webui` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
-- `bluenote tui [...args]`: requires daemon metadata, discovers the public `bluenote-term` executable on PATH, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
+- `bluenote web [...args]`: requires daemon metadata, resolves the optional `bluenote-webui` client through the configured `auto`/`path`/`built` client mode, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
+- `bluenote tui [...args]`: requires daemon metadata, resolves the optional `bluenote-term` client through the configured `auto`/`path`/`built` client mode, can auto-install the supported built terminal artifact when needed, and launches it with `BLUENOTE_DAEMON_URL` / `BLUENOTE_DAEMON_TOKEN` in the child environment.
 - `bn`: alias for the same distribution binary.
 
 ## Choosing the correct repo for a feature

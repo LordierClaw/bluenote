@@ -7,6 +7,7 @@
 ## Owns
 
 - top-level command routing
+- normal note-management CLI presentation (`init`, `new`, `list`, `show`, `search`, `edit`, `archive`, `delete`, `rebuild`) over public core APIs
 - `bluenote --help` and command help
 - `bluenote version`
 - `bluenote doctor`
