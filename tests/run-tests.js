@@ -246,7 +246,7 @@ function readReleaseWorkflow() {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
-  assert.equal(packageJson.version, '0.4.4');
+  assert.equal(packageJson.version, '0.4.5');
   assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.version, packageJson.version);
@@ -464,6 +464,21 @@ async function testReleaseWorkflowSiblingCheckoutContract() {
     /npm install -g\s+\\\s*@lordierclaw\/bluenote-webui@latest\s+\\\s*@lordierclaw\/bluenote-term@latest\s+\\\s*"\/workspace\/\$\{PACKAGE_TARBALL\}"/m,
     'release workflow should verify the local distribution tarball alongside latest published optional clients',
   );
+  assert.match(
+    workflow,
+    /permissions:\s+actions:\s+read\s+contents:\s+read\s+id-token:\s+write/m,
+    'release workflow should be allowed to read Actions state before publishing',
+  );
+  assert.match(
+    workflow,
+    /Require successful push check workflow for release commit/m,
+    'release workflow should require a green push check for the release commit before verifying/publishing',
+  );
+  assert.match(
+    workflow,
+    /REQUIRED_WORKFLOW_NAME:\s+check/m,
+    'release workflow should gate on the normal check workflow for the release commit',
+  );
   assert.doesNotMatch(
     workflow,
     /Checkout bluenote-core release sibling|Checkout bluenote-webui release sibling|Checkout bluenote-term release sibling/m,
@@ -583,7 +598,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedRun.status, 0);
-  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.4/i);
+  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.5/i);
 
   const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
     env: {
@@ -594,7 +609,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedTermRun.status, 0);
-  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.4/i);
+  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.5/i);
 
   const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
     env: {
@@ -605,7 +620,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
-  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.4/i);
+  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.5/i);
 
   const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
   const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
@@ -619,7 +634,7 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(outOfRepoVersionRun.status, 0);
-  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.4/i);
+  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.5/i);
 
   const partialConfigHome = makeTempDir('installer-partial-config-home');
   fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });
