@@ -500,13 +500,15 @@ async function testReleaseWorkflowSiblingCheckoutContract() {
 }
 
 async function testPackedArtifactIncludesDistributionBin() {
-  const tarball = childProcess.spawnSync('npm', ['pack', '--json'], {
+  const tarball = childProcess.spawnSync('npm', ['pack', '--json', '--silent'], {
     cwd: path.join(__dirname, '..'),
     encoding: 'utf8',
   });
   assert.equal(tarball.status, 0, tarball.stderr);
 
-  const packOutput = JSON.parse(tarball.stdout);
+  const packJsonStart = Math.max(tarball.stdout.lastIndexOf('\n['), tarball.stdout.lastIndexOf('\n{'));
+  const packJsonText = (packJsonStart === -1 ? tarball.stdout : tarball.stdout.slice(packJsonStart + 1)).trim();
+  const packOutput = JSON.parse(packJsonText);
   const tarballName = Array.isArray(packOutput) ? packOutput[0]?.filename : packOutput?.filename;
   assert.ok(tarballName, 'npm pack should report the tarball filename');
 
