@@ -128,7 +128,7 @@ function psSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-function extractArchiveExecutable(archivePath: string, asset: BuiltTuiAsset, spawnSync: SyncSpawn, platform: NodeJS.Platform): string {
+function extractArchivePackageDir(archivePath: string, asset: BuiltTuiAsset, spawnSync: SyncSpawn): string {
   const extractRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bluenote-term-extract-"))
   const extractedPackageDir = path.join(extractRoot, "bluenote")
   if (asset.archiveExtension === ".zip") {
@@ -146,8 +146,30 @@ function extractArchiveExecutable(archivePath: string, asset: BuiltTuiAsset, spa
   if (!fs.existsSync(extractedExecutable)) {
     throw new Error(`Built TUI archive did not contain ${path.join("bluenote", asset.executableName)}.`)
   }
-  if (platform !== "win32") fs.chmodSync(extractedExecutable, 0o755)
-  return extractedExecutable
+  return extractedPackageDir
+}
+
+function copyExtractedPackageContents(packageDir: string, destinationDir: string, asset: BuiltTuiAsset, platform: NodeJS.Platform): string {
+  const entries = fs.readdirSync(packageDir, { withFileTypes: true })
+  let executablePath = ""
+  for (const entry of entries) {
+    const sourcePath = path.join(packageDir, entry.name)
+    const targetName = entry.name === asset.executableName ? asset.executableDestinationName : entry.name
+    const targetPath = path.join(destinationDir, targetName)
+    if (entry.isDirectory()) {
+      fs.cpSync(sourcePath, targetPath, { recursive: true })
+      continue
+    }
+    fs.copyFileSync(sourcePath, targetPath)
+    if (platform !== "win32" && targetName === asset.executableDestinationName) {
+      fs.chmodSync(targetPath, 0o755)
+    }
+    if (targetName === asset.executableDestinationName) executablePath = targetPath
+  }
+  if (!executablePath) {
+    throw new Error(`Built TUI archive did not produce ${asset.executableDestinationName}.`)
+  }
+  return executablePath
 }
 
 export async function installManagedBuiltTuiClient(options: {
@@ -170,19 +192,19 @@ export async function installManagedBuiltTuiClient(options: {
   ensureDirectory(builtClientDir)
   ensureDirectory(path.dirname(configPath))
 
-  const executableDestination = path.join(builtClientDir, asset.executableDestinationName)
-
+  let executablePath: string
   if (env.BLUENOTE_TERM_ARTIFACT_PATH) {
-    fs.copyFileSync(env.BLUENOTE_TERM_ARTIFACT_PATH, executableDestination)
+    executablePath = path.join(builtClientDir, asset.executableDestinationName)
+    fs.copyFileSync(env.BLUENOTE_TERM_ARTIFACT_PATH, executablePath)
   } else {
     const archivePath = await resolveReleaseArchivePath(env, asset)
-    const extractedExecutable = extractArchiveExecutable(archivePath, asset, spawnSync, platform)
-    fs.copyFileSync(extractedExecutable, executableDestination)
+    const extractedPackageDir = extractArchivePackageDir(archivePath, asset, spawnSync)
+    executablePath = copyExtractedPackageContents(extractedPackageDir, builtClientDir, asset, platform)
     fs.rmSync(path.dirname(archivePath), { recursive: true, force: true })
-    fs.rmSync(path.dirname(path.dirname(extractedExecutable)), { recursive: true, force: true })
+    fs.rmSync(path.dirname(extractedPackageDir), { recursive: true, force: true })
   }
 
-  if (platform !== "win32") fs.chmodSync(executableDestination, 0o755)
+  if (platform !== "win32") fs.chmodSync(executablePath, 0o755)
   fs.writeFileSync(configPath, `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${builtClientDir}\n`, "utf8")
-  return { executablePath: executableDestination, builtClientDir }
+  return { executablePath, builtClientDir }
 }

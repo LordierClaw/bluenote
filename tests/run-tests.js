@@ -53,6 +53,7 @@ function createBuiltTuiArchive() {
   const packageDir = path.join(root, 'bluenote');
   fs.mkdirSync(packageDir, { recursive: true });
   writeExecutable(path.join(packageDir, 'bn'), '#!/usr/bin/env bash\nexit 0\n');
+  fs.writeFileSync(path.join(packageDir, 'sql-wasm.wasm'), 'wasm-placeholder');
   const archivePath = path.join(root, 'bluenote-vtest-linux-x64.tar.gz');
   const packed = childProcess.spawnSync('tar', ['-czf', archivePath, '-C', root, 'bluenote'], { encoding: 'utf8' });
   assert.equal(packed.status, 0, packed.stderr);
@@ -1544,6 +1545,7 @@ async function testTuiAutoInstallsBuiltClientWhenPathPackageCannotRun() {
     assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
     assert.deepEqual(calls[0].args, ['--smoke']);
     assert.ok(fs.existsSync(path.join(builtDir, 'bluenote-term')));
+    assert.ok(fs.existsSync(path.join(builtDir, 'sql-wasm.wasm')));
     const recordPath = path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'client-mode.env');
     assert.match(fs.readFileSync(recordPath, 'utf8'), /BLUENOTE_CLIENT_MODE=built/);
     assert.match(fs.readFileSync(recordPath, 'utf8'), new RegExp(escapeRegExp(builtDir)));
