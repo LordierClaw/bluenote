@@ -8,6 +8,7 @@ Usage: bluenote <command> [options]
 
 Commands:
   tui [...args]             Launch the terminal interface via bluenote-term
+  term [...args]            Alias for tui
   web [...args]             Launch the local WebUI via bluenote-webui
   daemon start|status|stop  Manage the local BlueNote daemon
   doctor                    Check runtime, daemon, and optional clients

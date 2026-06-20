@@ -7,7 +7,7 @@ import { runVersion } from "./commands/version"
 import { runWeb } from "./commands/web"
 import { write } from "./utils/write"
 
-export const COMMANDS = ["tui", "web", "daemon", "doctor", "version"] as const
+export const COMMANDS = ["tui", "term", "web", "daemon", "doctor", "version"] as const
 
 export async function run(args: string[] = [], io: CommandIo = {}): Promise<number> {
   const [command, ...commandArgs] = args
@@ -19,7 +19,7 @@ export async function run(args: string[] = [], io: CommandIo = {}): Promise<numb
   if (command === "version" || command === "--version") return runVersion(commandArgs, io)
   if (command === "doctor") return runDoctor(commandArgs, io)
   if (command === "daemon") return runDaemon(commandArgs, io)
-  if (command === "tui") return runTui(commandArgs, io)
+  if (command === "tui" || command === "term") return runTui(commandArgs, io)
   if (command === "web") return runWeb(commandArgs, io)
 
   write(io.stderr || process.stderr, `Unknown command: ${command}\nRun "bluenote --help" for usage.\n`)

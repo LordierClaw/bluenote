@@ -1173,6 +1173,7 @@ async function testDoctorReportsOptionalClients() {
   assert.match(found.stdout, /version: 1\.3\.14/);
   assert.match(found.stdout, /bluenote-term: path/);
   assert.match(found.stdout, new RegExp(escapeRegExp(termPath)));
+  assert.match(found.stdout, /tui runtime: ok/);
 }
 
 async function testDoctorReportsClientRuntimeModes() {
@@ -1195,6 +1196,7 @@ async function testDoctorReportsClientRuntimeModes() {
   assert.equal(built.code, 0);
   assert.match(built.stdout, /bluenote-term: built/);
   assert.match(built.stdout, new RegExp(escapeRegExp(builtTerm)));
+  assert.match(built.stdout, /tui runtime: ok/);
   assert.match(built.stdout, /Bun for source TUI: not required for built TUI/);
 
   const pathMode = await runCli(['doctor'], {
@@ -1209,6 +1211,7 @@ async function testDoctorReportsClientRuntimeModes() {
   assert.equal(pathMode.code, 0);
   assert.match(pathMode.stdout, /bluenote-term: path/);
   assert.match(pathMode.stdout, new RegExp(escapeRegExp(pathTerm)));
+  assert.match(pathMode.stdout, /tui runtime: ok/);
 
   const pathFlag = await runCli(['doctor', '--client-mode', 'path'], {
     nodeVersion: '18.19.0',
@@ -1222,6 +1225,7 @@ async function testDoctorReportsClientRuntimeModes() {
   assert.equal(pathFlag.code, 0);
   assert.match(pathFlag.stdout, /bluenote-term: path/);
   assert.match(pathFlag.stdout, new RegExp(escapeRegExp(pathTerm)));
+  assert.match(pathFlag.stdout, /tui runtime: ok/);
 
   let spawnCalled = false;
   const invalidMode = await runCli(['doctor'], {
@@ -1255,19 +1259,26 @@ async function testDoctorReportsClientRuntimeModes() {
 async function testDoctorReportsBrokenClients() {
   const tempBin = makeTempDir('doctor-broken-clients');
   const webPath = path.join(tempBin, 'bluenote-webui');
+  const termPath = path.join(tempBin, 'bluenote-term');
   writeExecutable(webPath);
+  writeExecutable(termPath);
   const found = await runCli(['doctor'], {
     nodeVersion: '18.19.0',
     platform: 'linux',
     env: { ...process.env, PATH: tempBin },
-    spawnSync(command) {
+    spawnSync(command, args) {
       if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      const joinedArgs = Array.isArray(args) ? args.join(' ') : '';
+      if (command.endsWith('bluenote-term') && joinedArgs.includes('--version')) return { status: 0, stdout: '0.4.5\n', stderr: '' };
+      if (command.endsWith('bluenote-term') && joinedArgs.includes('--probe-tui-runtime')) return { status: 1, stdout: '', stderr: 'runtime unavailable' };
       return { status: 1, stdout: '', stderr: 'broken client' };
     },
   });
   assert.equal(found.code, 0);
   assert.match(found.stdout, /bluenote-webui: broken/);
   assert.match(found.stdout, /version: unavailable/);
+  assert.match(found.stdout, /bluenote-term: broken/);
+  assert.match(found.stdout, /tui runtime: unavailable/);
 }
 
 async function testDoctorReportsHandshakeFailureWithoutMarkingClientBroken() {
@@ -1285,16 +1296,17 @@ async function testDoctorReportsHandshakeFailureWithoutMarkingClientBroken() {
       env: { ...env, PATH: tempBin, PATHEXT: '.COM;.EXE;.BAT;.CMD' },
       spawnSync(command, args, options) {
         calls.push({ command, args, options });
+        const joinedArgs = Array.isArray(args) ? args.join(' ') : '';
         if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
-        if (args.includes('--version')) return { status: 0, stdout: '0.4.2\n', stderr: '' };
-        if (args.includes('--check-daemon')) return { status: 1, stdout: '', stderr: 'handshake failed' };
+        if (joinedArgs.includes('--version')) return { status: 0, stdout: '0.4.2\n', stderr: '' };
+        if (joinedArgs.includes('--check-daemon')) return { status: 1, stdout: '', stderr: 'handshake failed' };
         return { status: 1, stdout: '', stderr: 'unexpected' };
       },
     });
     assert.equal(found.code, 0);
     assert.match(found.stdout, /bluenote-webui: path/);
     assert.match(found.stdout, /daemon handshake: failed/);
-    assert.equal(calls.some((call) => call.command === webPath && call.options.shell === true), true);
+    assert.equal(calls.some((call) => /cmd(.exe)?$/i.test(call.command) && call.args.at(-1).includes(webPath)), true);
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
@@ -1306,6 +1318,12 @@ async function testUnknownCommand() {
   assert.equal(result.code, 1);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /Unknown command: nope/);
+}
+
+async function testTermAlias() {
+  const result = await runCli(['term']);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /BlueNote daemon is not running/);
 }
 
 async function testDaemonLifecycle() {
@@ -1572,8 +1590,9 @@ async function testWindowsClientLaunchUsesShellForCmdShims() {
     }
     const result = await runCli(['web'], { env: { ...env, PATH: tempBin, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, platform: 'win32', spawn });
     assert.equal(result.code, 0);
-    assert.equal(calls[0].command, webPath);
-    assert.equal(calls[0].options.shell, true);
+    assert.match(calls[0].command, /cmd(.exe)?$/i);
+    assert.equal(calls[0].args.slice(0, 3).join(' '), '/d /s /c');
+    assert.match(calls[0].args[3], /bluenote-webui\.CMD/i);
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
@@ -1690,6 +1709,7 @@ const tests = [
   testDoctorReportsHandshakeFailureWithoutMarkingClientBroken,
   testDoctorReportsClientRuntimeModes,
   testUnknownCommand,
+  testTermAlias,
   testDaemonLifecycle,
   testDaemonStartDoesNotExposeTokenInArgv,
   testStaleDaemonMetadata,

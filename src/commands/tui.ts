@@ -3,6 +3,7 @@ import { spawn as defaultSpawn } from "child_process"
 import type { CommandIo } from "../types"
 import { parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
+import { buildWindowsShimInvocation, isWindowsShellShim } from "../utils/windows-shim"
 import { write } from "../utils/write"
 
 function daemonNotRunning(io: CommandIo): number {
@@ -37,9 +38,11 @@ export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<n
   return await new Promise<number>((resolve) => {
     let child
     try {
-      child = spawn(resolution.path, parsed.args, {
+      const invocation = isWindowsShellShim(resolution.path, io.platform || process.platform)
+        ? buildWindowsShimInvocation(resolution.path, parsed.args, env)
+        : { command: resolution.path, args: parsed.args }
+      child = spawn(invocation.command, invocation.args, {
         stdio: ["inherit", "inherit", "inherit"],
-        shell: (io.platform || process.platform) === "win32" && /\.(cmd|bat)$/i.test(resolution.path),
         env: {
           ...env,
           BLUENOTE_DAEMON_URL: metadata.url,

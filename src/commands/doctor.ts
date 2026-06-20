@@ -7,13 +7,10 @@ import { parseClientModeArgs, resolveClientCommand } from "../utils/command-disc
 import { readDaemonStatus } from "../utils/daemon-state"
 import { readOwnPackageInfo } from "../utils/package-info"
 import { isSupportedNodeVersion, nodeRequirementText } from "../utils/runtime-requirements"
+import { buildWindowsShimInvocation, isWindowsShellShim } from "../utils/windows-shim"
 import { write } from "../utils/write"
 
 const OPTIONAL_CLIENTS = ["bluenote-webui", "bluenote-term"] as const
-
-function isWindowsShellCommand(commandPath: string, platform: NodeJS.Platform): boolean {
-  return platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
-}
 
 function runClientCheck(
   commandPath: string,
@@ -23,10 +20,12 @@ function runClientCheck(
   env: NodeJS.ProcessEnv,
 ): { ok: boolean; stdout: string; stderr: string } {
   const spawnSync = io.spawnSync || defaultSpawnSync
-  const result = spawnSync(commandPath, args, {
+  const invocation = isWindowsShellShim(commandPath, platform)
+    ? buildWindowsShimInvocation(commandPath, args, env)
+    : { command: commandPath, args }
+  const result = spawnSync(invocation.command, invocation.args, {
     encoding: "utf8",
     env,
-    shell: isWindowsShellCommand(commandPath, platform),
     timeout: 5_000,
   })
   return {
@@ -94,15 +93,21 @@ export async function runDoctor(args: string[] = [], io: CommandIo = {}): Promis
       clientEnv.BLUENOTE_DAEMON_TOKEN = daemon.metadata.token
     }
     const version = runClientCheck(resolution.path, ["--version"], io, platform, clientEnv)
+    const tuiRuntime = client === "bluenote-term"
+      ? runClientCheck(resolution.path, ["--probe-tui-runtime"], io, platform, clientEnv)
+      : undefined
     const handshake = daemon.state === "running" && daemon.metadata
       ? runClientCheck(resolution.path, ["--check-daemon"], io, platform, clientEnv)
       : undefined
-    const status = version.ok ? resolution.mode : "broken"
+    const status = version.ok && (tuiRuntime?.ok ?? true) ? resolution.mode : "broken"
     if (client === "bluenote-term" && resolution.mode === "built" && status === "built") builtTuiAvailable = true
 
     write(stdout, `  ${client}: ${status}\n`)
     write(stdout, `    path: ${resolution.path}\n`)
     write(stdout, `    version: ${version.ok ? firstLine(version.stdout) || "available" : "unavailable"}\n`)
+    if (client === "bluenote-term") {
+      write(stdout, `    tui runtime: ${tuiRuntime ? tuiRuntime.ok ? "ok" : "unavailable" : "not checked"}\n`)
+    }
     write(stdout, `    daemon handshake: ${handshake ? handshake.ok ? "ok" : "failed" : "not checked"}\n`)
   }
 

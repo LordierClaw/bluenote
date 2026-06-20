@@ -64,9 +64,10 @@ Manual npm install is also supported for advanced users:
 ```sh
 npm install -g @lordierclaw/bluenote
 npm install -g @lordierclaw/bluenote-webui # optional
-npm install -g @lordierclaw/bluenote-term  # optional built TUI package when available
 bluenote doctor
 ```
+
+For end-user TUI usage, prefer the installer-managed built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
 
 Run clients through the distribution command after starting the daemon:
 
