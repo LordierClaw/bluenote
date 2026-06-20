@@ -1,6 +1,6 @@
 {
   "name": "@lordierclaw/bluenote",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Official BlueNote distribution CLI.",
   "license": "MIT",
   "repository": {
@@ -23,6 +23,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/bin.js', 0o755)\"",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node tests/run-tests.js",
     "version:status": "node scripts/version-status.mjs",

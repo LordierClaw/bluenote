@@ -200,6 +200,8 @@ The distribution repo also owns the release gate for `@lordierclaw/bluenote`: pu
 
 The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` and `bn`.
 
+The published tarball must include `dist/bin.js` so npm can generate working `bluenote` / `bn` launchers, including Windows `.cmd` shims. The package `prepack` hook rebuilds `dist/` before `npm pack` / `npm publish`.
+
 The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
 The distribution package consumes the latest published `@lordierclaw/bluenote-core` by default instead of requiring a same-version coordinated release. BlueNote repos now release independently rather than following lockstep sibling version bumps. For local development workspaces that intentionally opt into Git-pinned dependencies, keep using `npm run version:status -- --allow-git-deps`.

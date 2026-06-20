@@ -114,7 +114,7 @@ npm run build
 npm run check
 ```
 
-`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run build` also marks `dist/bin.js` executable so `npm link` creates runnable `bluenote`/`bn` commands. `npm run check` runs typecheck, tests, and a final build.
+`npm run test` builds `dist/` first and runs the Node-based CLI contract tests. `npm run build` also marks `dist/bin.js` executable so `npm link` creates runnable `bluenote`/`bn` commands. The package `prepack` hook reruns that build before `npm pack` / `npm publish` so published tarballs keep the compiled `dist/` payload needed for npm-generated launchers, including Windows `.cmd` shims. `npm run check` runs typecheck, tests, and a final build.
 
 ## Implemented command surface
 

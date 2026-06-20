@@ -246,7 +246,7 @@ function readReleaseWorkflow() {
 
 async function testPackageMetadata() {
   assert.equal(packageJson.name, '@lordierclaw/bluenote');
-  assert.equal(packageJson.version, '0.4.5');
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
   assert.deepEqual(packageJson.files, ['dist', 'README.md', 'LICENSE', 'package.json']);
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.version, packageJson.version);
@@ -261,6 +261,7 @@ async function testPackageMetadata() {
   for (const script of ['clean', 'build', 'typecheck', 'test', 'check']) {
     assert.ok(packageJson.scripts[script], `missing script ${script}`);
   }
+  assert.equal(packageJson.scripts.prepack, 'npm run build');
   assert.equal(packageJson.dependencies['@lordierclaw/bluenote-core'], 'latest');
   assert.equal(packageLock.packages[''].dependencies['@lordierclaw/bluenote-core'], 'latest');
   assert.equal(packageJson.dependencies['bluenote-term'], undefined);
@@ -498,6 +499,30 @@ async function testReleaseWorkflowSiblingCheckoutContract() {
   );
 }
 
+async function testPackedArtifactIncludesDistributionBin() {
+  const tarball = childProcess.spawnSync('npm', ['pack', '--json'], {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  assert.equal(tarball.status, 0, tarball.stderr);
+
+  const packOutput = JSON.parse(tarball.stdout);
+  const tarballName = Array.isArray(packOutput) ? packOutput[0]?.filename : packOutput?.filename;
+  assert.ok(tarballName, 'npm pack should report the tarball filename');
+
+  try {
+    const listing = childProcess.spawnSync('tar', ['-tzf', tarballName], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+    });
+    assert.equal(listing.status, 0, listing.stderr);
+    assert.match(listing.stdout, /package\/dist\/bin\.js/, 'packed artifact should include dist/bin.js for npm-generated CLI shims');
+    assert.match(listing.stdout, /package\/dist\/cli\.js/, 'packed artifact should include compiled distribution runtime files');
+  } finally {
+    fs.rmSync(path.join(__dirname, '..', tarballName), { force: true });
+  }
+}
+
 async function testInstallerPreflightContract() {
   const installSh = readScript('scripts/install.sh');
   const uninstallSh = readScript('scripts/uninstall.sh');
@@ -610,7 +635,10 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedRun.status, 0);
-  assert.match(olderScopedRun.stderr + olderScopedRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.5/i);
+  assert.match(
+    olderScopedRun.stderr + olderScopedRun.stdout,
+    new RegExp(`older scoped package installed: @lordierclaw/bluenote@0\\.0\\.5 < requested ${escapeRegExp(packageJson.version)}`, 'i'),
+  );
 
   const olderScopedTermRun = runScript('scripts/install.sh', ['--yes', '--with-tui', '--dry-run'], {
     env: {
@@ -621,7 +649,10 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(olderScopedTermRun.status, 0);
-  assert.match(olderScopedTermRun.stderr + olderScopedTermRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.5/i);
+  assert.match(
+    olderScopedTermRun.stderr + olderScopedTermRun.stdout,
+    new RegExp(`older scoped package installed: @lordierclaw/bluenote-term@0\\.0\\.5 < requested ${escapeRegExp(packageJson.version)}`, 'i'),
+  );
 
   const cliOnlyIgnoresOptionalClientVersionRun = runScript('scripts/install.sh', ['--yes', '--dry-run'], {
     env: {
@@ -632,7 +663,10 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.equal(cliOnlyIgnoresOptionalClientVersionRun.status, 0, cliOnlyIgnoresOptionalClientVersionRun.stderr);
-  assert.doesNotMatch(cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote-term@0\.0\.5 < requested 0\.4\.5/i);
+  assert.doesNotMatch(
+    cliOnlyIgnoresOptionalClientVersionRun.stderr + cliOnlyIgnoresOptionalClientVersionRun.stdout,
+    new RegExp(`older scoped package installed: @lordierclaw/bluenote-term@0\\.0\\.5 < requested ${escapeRegExp(packageJson.version)}`, 'i'),
+  );
 
   const outOfRepoCwd = makeTempDir('installer-out-of-repo-cwd');
   const outOfRepoVersionRun = childProcess.spawnSync(path.join(__dirname, '..', 'scripts', 'install.sh'), ['--yes', '--dry-run'], {
@@ -646,7 +680,10 @@ async function testInstallerPreflightContract() {
     },
   });
   assert.notEqual(outOfRepoVersionRun.status, 0);
-  assert.match(outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout, /older scoped package installed: @lordierclaw\/bluenote@0\.0\.5 < requested 0\.4\.5/i);
+  assert.match(
+    outOfRepoVersionRun.stderr + outOfRepoVersionRun.stdout,
+    new RegExp(`older scoped package installed: @lordierclaw/bluenote@0\\.0\\.5 < requested ${escapeRegExp(packageJson.version)}`, 'i'),
+  );
 
   const partialConfigHome = makeTempDir('installer-partial-config-home');
   fs.mkdirSync(path.join(partialConfigHome, 'bluenote'), { recursive: true });
@@ -1631,6 +1668,7 @@ const tests = [
   testReadmeStructureContract,
   testDevLocalScriptsContract,
   testReleaseWorkflowSiblingCheckoutContract,
+  testPackedArtifactIncludesDistributionBin,
   testInstallerPreflightContract,
   testDevVerifyLocalScriptsContract,
   testHelpDoesNotLoadClients,
