@@ -1,6 +1,7 @@
-import { spawn as defaultSpawn } from "child_process"
+import { spawn as defaultSpawn, spawnSync as defaultSpawnSync } from "child_process"
 
 import type { CommandIo } from "../types"
+import { installManagedBuiltTuiClient } from "../utils/built-tui-install"
 import { parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
 import { buildWindowsShimInvocation, isWindowsShellShim } from "../utils/windows-shim"
@@ -20,6 +21,28 @@ function missingClient(io: CommandIo, command: string, mode: string): number {
   return 1
 }
 
+function probeTuiRuntime(commandPath: string, env: NodeJS.ProcessEnv, io: CommandIo): { ok: boolean; message?: string } {
+  const spawnSync = io.spawnSync || defaultSpawnSync
+  const invocation = isWindowsShellShim(commandPath, io.platform || process.platform)
+    ? buildWindowsShimInvocation(commandPath, ["--probe-tui-runtime"], env)
+    : { command: commandPath, args: ["--probe-tui-runtime"] }
+  const result = spawnSync(invocation.command, invocation.args, {
+    encoding: "utf8",
+    env,
+  })
+  if (result.error) return { ok: false, message: result.error.message }
+  if (result.status === 0) return { ok: true }
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : ""
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : ""
+  return { ok: false, message: stderr || stdout || `exit ${result.status ?? 1}` }
+}
+
+async function installBuiltTui(io: CommandIo, env: NodeJS.ProcessEnv): Promise<{ command: string; path: string; mode: "built" }> {
+  write(io.stderr || process.stderr, "Downloading the latest built BlueNote terminal artifact...\n")
+  const installed = await installManagedBuiltTuiClient({ env, platform: io.platform || process.platform, spawnSync: io.spawnSync || defaultSpawnSync })
+  return { command: "bluenote-term", path: installed.executablePath, mode: "built" }
+}
+
 export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<number> {
   const env = io.env || process.env
   const daemon = await readDaemonStatus(env)
@@ -31,16 +54,47 @@ export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<n
     return 1
   }
 
-  const resolution = resolveClientCommand("bluenote-term", { env, clientMode: parsed.mode, platform: io.platform || process.platform, pathext: env.PATHEXT })
-  if (!resolution) return missingClient(io, "bluenote-term", parsed.mode)
+  let activeResolution = resolveClientCommand("bluenote-term", { env, clientMode: parsed.mode, platform: io.platform || process.platform, pathext: env.PATHEXT })
+  if (!activeResolution) {
+    if (parsed.mode === "auto") {
+      try {
+        activeResolution = await installBuiltTui(io, env)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        write(io.stderr || process.stderr, `Unable to install the built BlueNote terminal artifact automatically: ${message}\n`)
+        return 1
+      }
+    } else {
+      return missingClient(io, "bluenote-term", parsed.mode)
+    }
+  }
+
+  if (activeResolution.mode === "path" && parsed.mode === "auto") {
+    const probe = probeTuiRuntime(activeResolution.path, {
+      ...env,
+      BLUENOTE_DAEMON_URL: metadata.url,
+      BLUENOTE_DAEMON_TOKEN: metadata.token,
+    }, io)
+    if (!probe.ok) {
+      write(io.stderr || process.stderr, "Installed npm bluenote-term cannot launch the full TUI here.\n")
+      try {
+        activeResolution = await installBuiltTui(io, env)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        write(io.stderr || process.stderr, `Unable to install the built BlueNote terminal artifact automatically: ${message}\n`)
+        if (probe.message) write(io.stderr || process.stderr, `npm bluenote-term probe failed: ${probe.message}\n`)
+        return 1
+      }
+    }
+  }
 
   const spawn = io.spawn || defaultSpawn
   return await new Promise<number>((resolve) => {
     let child
     try {
-      const invocation = isWindowsShellShim(resolution.path, io.platform || process.platform)
-        ? buildWindowsShimInvocation(resolution.path, parsed.args, env)
-        : { command: resolution.path, args: parsed.args }
+      const invocation = isWindowsShellShim(activeResolution.path, io.platform || process.platform)
+        ? buildWindowsShimInvocation(activeResolution.path, parsed.args, env)
+        : { command: activeResolution.path, args: parsed.args }
       child = spawn(invocation.command, invocation.args, {
         stdio: ["inherit", "inherit", "inherit"],
         env: {

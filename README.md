@@ -57,7 +57,7 @@ The installer runs preflight checks before mutating state, detects common confli
 
 Uninstall stops the daemon first when possible and removes `@lordierclaw/bluenote`, `@lordierclaw/bluenote-webui`, and managed built terminal client artifacts/packages. Normal install and uninstall preserve user notes/config/data. `--purge-data` / `-PurgeData` is the only destructive user-data path and requires the exact typed confirmation phrase `delete my bluenote data`.
 
-The default `auto` client mode lets `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. The user TUI path uses a built terminal artifact/package and does not auto-install Bun or require Bun at runtime. `bluenote doctor` runs after installation and reports each client as `built`, `path`, `missing`, or `broken`.
+The default `auto` client mode lets `bluenote web` and `bluenote tui` prefer installer-managed built client artifacts from `BLUENOTE_BUILT_CLIENT_DIR` when present, then fall back to `PATH` discovery for `bluenote-webui` and `bluenote-term`. On supported end-user TUI platforms, `bluenote tui` can also auto-download the latest built terminal artifact from the `bluenote-term` GitHub Release when no usable local TUI runtime is available. Use `--client-mode path|built|auto` on a launch command, or set `BLUENOTE_CLIENT_MODE=path|built|auto`, to force or inspect a runtime mode. The user TUI path uses a built terminal artifact/package and does not auto-install Bun or require Bun at runtime. `bluenote doctor` runs after installation and reports each client as `built`, `path`, `missing`, or `broken`.
 
 Manual npm install is also supported for advanced users:
 
@@ -67,7 +67,7 @@ npm install -g @lordierclaw/bluenote-webui # optional
 bluenote doctor
 ```
 
-For end-user TUI usage, prefer the installer-managed built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
+For end-user TUI usage, prefer the installer-managed or auto-downloaded built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
 
 Run clients through the distribution command after starting the daemon:
 

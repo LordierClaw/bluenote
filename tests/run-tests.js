@@ -48,6 +48,17 @@ function writeExecutable(filePath, content = '#!/usr/bin/env node\nprocess.exit(
   fs.chmodSync(filePath, 0o755);
 }
 
+function createBuiltTuiArchive() {
+  const root = makeTempDir('built-tui-archive');
+  const packageDir = path.join(root, 'bluenote');
+  fs.mkdirSync(packageDir, { recursive: true });
+  writeExecutable(path.join(packageDir, 'bn'), '#!/usr/bin/env bash\nexit 0\n');
+  const archivePath = path.join(root, 'bluenote-vtest-linux-x64.tar.gz');
+  const packed = childProcess.spawnSync('tar', ['-czf', archivePath, '-C', root, 'bluenote'], { encoding: 'utf8' });
+  assert.equal(packed.status, 0, packed.stderr);
+  return { root, archivePath };
+}
+
 function makeDaemonEnv() {
   const root = makeTempDir('daemon-env');
   const env = {
@@ -1442,7 +1453,7 @@ async function testClientLaunchUsesPathAndDaemonEnv() {
 
     const web = await runCli(['web', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
     assert.equal(web.code, 0);
-    const tui = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin }, spawn });
+    const tui = await runCli(['tui', '--smoke'], { env: { ...env, PATH: tempBin }, spawn, spawnSync: () => ({ status: 0, stdout: '', stderr: '' }) });
     assert.equal(tui.code, 0);
 
     assert.equal(calls[0].command, webPath);
@@ -1491,6 +1502,55 @@ async function testClientLaunchUsesBuiltAndPathModes() {
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiAutoInstallsBuiltClientWhenPathPackageCannotRun() {
+  const tempBin = makeTempDir('client-auto-install-path');
+  const builtDir = makeTempDir('client-auto-install-built');
+  const archive = createBuiltTuiArchive();
+  const { root, env } = makeDaemonEnv();
+  try {
+    const pathTerm = path.join(tempBin, 'bluenote-term');
+    writeExecutable(pathTerm);
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    function spawnSync(command, args, options) {
+      if (command === pathTerm && args.includes('--probe-tui-runtime')) {
+        return { status: 1, stdout: '', stderr: 'runtime unavailable' };
+      }
+      return childProcess.spawnSync(command, args, options);
+    }
+
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: tempBin,
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+      },
+      spawn,
+      spawnSync,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stderr, /downloading the latest built BlueNote terminal artifact/i);
+    assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
+    assert.deepEqual(calls[0].args, ['--smoke']);
+    assert.ok(fs.existsSync(path.join(builtDir, 'bluenote-term')));
+    const recordPath = path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'client-mode.env');
+    assert.match(fs.readFileSync(recordPath, 'utf8'), /BLUENOTE_CLIENT_MODE=built/);
+    assert.match(fs.readFileSync(recordPath, 'utf8'), new RegExp(escapeRegExp(builtDir)));
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
   }
 }
 
@@ -1716,6 +1776,7 @@ const tests = [
   testClientLaunchRequiresDaemon,
   testClientLaunchUsesPathAndDaemonEnv,
   testClientLaunchUsesBuiltAndPathModes,
+  testTuiAutoInstallsBuiltClientWhenPathPackageCannotRun,
   testBuiltModeMissingClientMessage,
   testClientModeValidation,
   testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning,

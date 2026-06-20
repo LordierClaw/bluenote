@@ -84,13 +84,13 @@ function invalidModeMessage(source: string, value: string): string {
   return `Invalid ${source} "${value}". Expected auto, path, or built.\n`
 }
 
-function getClientModeConfigPath(env: NodeJS.ProcessEnv): string {
+export function getClientModeConfigPath(env: NodeJS.ProcessEnv): string {
   if (env.APPDATA && !env.BLUENOTE_CONFIG_HOME && !env.XDG_CONFIG_HOME) return path.join(env.APPDATA, "bluenote", "client-mode.env")
   const configRoot = env.BLUENOTE_CONFIG_HOME || env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
   return path.join(configRoot, "bluenote", "client-mode.env")
 }
 
-function readPersistedClientMode(env: NodeJS.ProcessEnv): PersistedClientMode {
+export function readPersistedClientMode(env: NodeJS.ProcessEnv): PersistedClientMode {
   try {
     const content = fs.readFileSync(getClientModeConfigPath(env), "utf8")
     const config: PersistedClientMode = {}
