@@ -80,10 +80,6 @@ function isSemver(version) {
   ).test(version);
 }
 
-function isExactSemver(version) {
-  return isSemver(version);
-}
-
 function isLatestDependency(version) {
   return version === 'latest';
 }
@@ -115,12 +111,11 @@ function validatePackage(definition, packageJson, packagePath, options) {
     definition.expectedName !== '@lordierclaw/bluenote-core'
     && typeof coreDependency === 'string'
     && !isGitDependency(coreDependency)
-    && !isExactSemver(coreDependency)
     && !isLatestDependency(coreDependency)
   ) {
     throw new Error(
-      `${packagePath}: ${definition.expectedName} must use latest, an exact semver, or a Git dependency for `
-        + `@lordierclaw/bluenote-core; found ${coreDependency}.`,
+      `${packagePath}: ${definition.expectedName} must use latest for @lordierclaw/bluenote-core in release mode; `
+        + `found ${coreDependency}. Use --allow-git-deps only for local development checks with a pinned Git dependency.`,
     );
   }
 

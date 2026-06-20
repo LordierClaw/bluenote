@@ -192,7 +192,7 @@ node dist/bin.js version
 node dist/bin.js doctor
 ```
 
-`npm run version:status` checks the four sibling package names and versions and rejects unsupported `@lordierclaw/bluenote-core` dependency specs. `latest` and exact published semver are both acceptable release-mode dependency shapes; development mode may use pinned Git deps when you intentionally pass `--allow-git-deps` for a local-only workspace.
+`npm run version:status` checks the four sibling package names and versions and rejects unsupported `@lordierclaw/bluenote-core` dependency specs. Release mode requires `latest` for published core consumption; development mode may use pinned Git deps when you intentionally pass `--allow-git-deps` for a local-only workspace.
 
 The distribution repo also owns the release gate for `@lordierclaw/bluenote`: publishing a GitHub Release for the matching `v*` tag triggers the workflow, which runs the repo checks and a fresh Docker `node:22-bookworm` install/smoke pass before npm publish is allowed to continue.
 
@@ -202,7 +202,7 @@ The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` a
 
 The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
 
-The distribution package consumes the latest published `@lordierclaw/bluenote-core` by default instead of requiring a same-version coordinated release. For local development workspaces that intentionally opt into Git-pinned dependencies, keep using `npm run version:status -- --allow-git-deps`.
+The distribution package consumes the latest published `@lordierclaw/bluenote-core` by default instead of requiring a same-version coordinated release. BlueNote repos now release independently rather than following lockstep sibling version bumps. For local development workspaces that intentionally opt into Git-pinned dependencies, keep using `npm run version:status -- --allow-git-deps`.
 
 ## Cross-platform notes
 

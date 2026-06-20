@@ -284,15 +284,15 @@ async function testVersionStatusScript() {
   assert.match(result.stdout, /@lordierclaw\/bluenote-term\s+0\.1\.0/);
   assert.equal(result.stderr, '');
 
-  const exactDepRoot = writeVersionStatusFixture({
+  const latestDepRoot = writeVersionStatusFixture({
     bluenote: {
       dependencies: {
-        '@lordierclaw/bluenote-core': '0.1.0',
+        '@lordierclaw/bluenote-core': 'latest',
       },
     },
   });
-  const exactDep = runVersionStatus(['--workspace-root', exactDepRoot]);
-  assert.equal(exactDep.status, 0, exactDep.stderr);
+  const latestDep = runVersionStatus(['--workspace-root', latestDepRoot]);
+  assert.equal(latestDep.status, 0, latestDep.stderr);
 }
 
 async function testVersionStatusScriptFailures() {
@@ -326,12 +326,24 @@ async function testVersionStatusScriptFailures() {
     const rangeDep = runVersionStatus(['--workspace-root', rangeDepRoot]);
     assert.notEqual(rangeDep.status, 0);
     assert.match(rangeDep.stderr, new RegExp(escapeRegExp(packagePath)));
-    assert.match(rangeDep.stderr, /must use latest, an exact semver, or a Git dependency/);
+    assert.match(rangeDep.stderr, /must use latest for @lordierclaw\/bluenote-core in release mode/);
 
     const rangeDepAllowed = runVersionStatus(['--workspace-root', rangeDepRoot, '--allow-git-deps']);
     assert.notEqual(rangeDepAllowed.status, 0);
     assert.match(rangeDepAllowed.stderr, new RegExp(escapeRegExp(packagePath)));
-    assert.match(rangeDepAllowed.stderr, /must use latest, an exact semver, or a Git dependency/);
+    assert.match(rangeDepAllowed.stderr, /must use latest for @lordierclaw\/bluenote-core in release mode/);
+
+    const exactDepRoot = writeVersionStatusFixture({
+      [repoName]: {
+        dependencies: {
+          '@lordierclaw/bluenote-core': '0.1.0',
+        },
+      },
+    });
+    const exactDep = runVersionStatus(['--workspace-root', exactDepRoot]);
+    assert.notEqual(exactDep.status, 0);
+    assert.match(exactDep.stderr, new RegExp(escapeRegExp(packagePath)));
+    assert.match(exactDep.stderr, /must use latest for @lordierclaw\/bluenote-core in release mode/);
   }
 
   const badNameRoot = writeVersionStatusFixture({
@@ -398,7 +410,7 @@ async function testReadmeStructureContract() {
   }
 
   assert.match(readmes.bluenote, /development mode may use pinned Git deps/i, 'bluenote README should explain that development mode may use pinned Git dependencies');
-  assert.match(readmes.bluenote, /exact published semver are both acceptable release-mode dependency shapes/i, 'bluenote README should explain the allowed published core dependency shapes');
+  assert.match(readmes.bluenote, /release mode requires `latest` for published core consumption/i, 'bluenote README should explain the required published core dependency shape');
   assert.match(readmes.bluenote, /npm run version:status`?\s+checks the four sibling package names and versions/i, 'bluenote README should describe the version status check');
   assert.doesNotMatch(readmes.bluenote, /release-like dependency modes, prefer published npm versions or immutable Git tags\/commits/i, 'bluenote README should not describe Git dependencies as acceptable in release mode');
 }
