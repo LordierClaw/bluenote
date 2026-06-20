@@ -1,18 +1,19 @@
 # BlueNote Distribution CLI
 
-`@lordierclaw/bluenote` is the official BlueNote app entrypoint and top-level command router. It exposes the `bluenote` and `bn` binaries, keeps distribution commands lightweight, and launches optional WebUI/TUI clients through their public executables.
+`@lordierclaw/bluenote` is the official BlueNote app entrypoint and top-level command router. It exposes the `bluenote` and `bn` binaries, owns the normal note-management CLI, keeps distribution commands lightweight, and launches optional WebUI/TUI clients through their public executables.
 
 ## Role in BlueNote
 
 This repo owns:
 
 - top-level `bluenote`/`bn` command routing
+- the normal note-management CLI: `init`, `new`, `list`, `show`, `search`, `edit`, `archive`, `delete`, and `rebuild`
 - `--help`, `version`, and `doctor`
 - minimal local daemon lifecycle and capability reporting
 - optional client discovery in explicit `auto`, `path`, and `built` runtime modes
 - distribution packaging and install guidance
 
-It does not own core note behavior, browser UI implementation, or terminal UI implementation. Those live in `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`.
+It does not own core note model/storage/search semantics, browser UI implementation, or terminal UI implementation. Those live in `@lordierclaw/bluenote-core`, `@lordierclaw/bluenote-webui`, and `@lordierclaw/bluenote-term`.
 
 ## Install
 
@@ -65,6 +66,17 @@ Manual npm install is also supported for advanced users:
 npm install -g @lordierclaw/bluenote
 npm install -g @lordierclaw/bluenote-webui # optional
 bluenote doctor
+```
+
+`bluenote` is the normal note-management CLI. Start a workspace, create notes, and inspect them directly from the distribution binary:
+
+```sh
+bluenote init
+bluenote new --title "Project kickoff" "Capture the first note body"
+bluenote new "Quick draft body"
+bluenote list
+bluenote show <key|path>
+bluenote search kickoff
 ```
 
 For end-user TUI usage, prefer the installer-managed or auto-downloaded built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
@@ -203,7 +215,7 @@ The package name is `@lordierclaw/bluenote`; published binaries are `bluenote` a
 
 The published tarball must include `dist/bin.js` so npm can generate working `bluenote` / `bn` launchers, including Windows `.cmd` shims. The package `prepack` hook rebuilds `dist/` before `npm pack` / `npm publish`.
 
-The distribution depends on `@lordierclaw/bluenote-core` for headless behavior. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`.
+The distribution depends on `@lordierclaw/bluenote-core` for headless note behavior. Normal note-management commands are implemented in this distribution package as CLI presentation over public core APIs. Optional clients are installed separately and discovered as `bluenote-webui` and `bluenote-term` executables on `PATH`; the terminal package is an optional TUI client, not the owner of the normal note CLI.
 
 The distribution package consumes the latest published `@lordierclaw/bluenote-core` by default instead of requiring a same-version coordinated release. BlueNote repos now release independently rather than following lockstep sibling version bumps. For local development workspaces that intentionally opt into Git-pinned dependencies, keep using `npm run version:status -- --allow-git-deps`.
 
@@ -219,4 +231,4 @@ The distribution package consumes the latest published `@lordierclaw/bluenote-co
 
 - `@lordierclaw/bluenote-core`: headless note model, storage, search, AI config/queue/provider behavior, and public core APIs.
 - `@lordierclaw/bluenote-webui`: optional local browser client and localhost server/proxy.
-- `@lordierclaw/bluenote-term`: optional terminal/TUI client and terminal command API.
+- `@lordierclaw/bluenote-term`: optional terminal/TUI client and TUI launch/probe command API.
