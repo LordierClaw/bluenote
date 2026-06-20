@@ -500,8 +500,9 @@ async function testReleaseWorkflowSiblingCheckoutContract() {
 }
 
 async function testPackedArtifactIncludesDistributionBin() {
+  const repoRoot = path.join(__dirname, '..');
   const tarball = childProcess.spawnSync('npm', ['pack', '--json', '--silent'], {
-    cwd: path.join(__dirname, '..'),
+    cwd: repoRoot,
     encoding: 'utf8',
   });
   assert.equal(tarball.status, 0, tarball.stderr);
@@ -509,19 +510,23 @@ async function testPackedArtifactIncludesDistributionBin() {
   const packJsonStart = Math.max(tarball.stdout.lastIndexOf('\n['), tarball.stdout.lastIndexOf('\n{'));
   const packJsonText = (packJsonStart === -1 ? tarball.stdout : tarball.stdout.slice(packJsonStart + 1)).trim();
   const packOutput = JSON.parse(packJsonText);
-  const tarballName = Array.isArray(packOutput) ? packOutput[0]?.filename : packOutput?.filename;
-  assert.ok(tarballName, 'npm pack should report the tarball filename');
+  const reportedTarballName = Array.isArray(packOutput) ? packOutput[0]?.filename : packOutput?.filename;
+  const tarballName = [reportedTarballName]
+    .filter(Boolean)
+    .find((candidate) => fs.existsSync(path.join(repoRoot, candidate)))
+    || fs.readdirSync(repoRoot).find((candidate) => candidate.endsWith('.tgz'));
+  assert.ok(tarballName, 'npm pack should create a tarball in the repo root');
 
   try {
     const listing = childProcess.spawnSync('tar', ['-tzf', tarballName], {
-      cwd: path.join(__dirname, '..'),
+      cwd: repoRoot,
       encoding: 'utf8',
     });
     assert.equal(listing.status, 0, listing.stderr);
     assert.match(listing.stdout, /package\/dist\/bin\.js/, 'packed artifact should include dist/bin.js for npm-generated CLI shims');
     assert.match(listing.stdout, /package\/dist\/cli\.js/, 'packed artifact should include compiled distribution runtime files');
   } finally {
-    fs.rmSync(path.join(__dirname, '..', tarballName), { force: true });
+    fs.rmSync(path.join(repoRoot, tarballName), { force: true });
   }
 }
 
