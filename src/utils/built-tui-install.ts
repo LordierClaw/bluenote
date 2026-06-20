@@ -12,7 +12,7 @@ type SyncSpawn = typeof import("child_process").spawnSync
 
 type BuiltTuiAsset = {
   archiveExtension: ".zip" | ".tar.gz"
-  executableName: "bn.exe" | "bn"
+  executableName: "bluenote-term.exe" | "bluenote-term"
   executableDestinationName: "bluenote-term.exe" | "bluenote-term"
   platformId: "windows-x64" | "linux-x64"
 }
@@ -22,7 +22,7 @@ function detectBuiltTuiAsset(platform: NodeJS.Platform, arch: string): BuiltTuiA
     return {
       platformId: "windows-x64",
       archiveExtension: ".zip",
-      executableName: "bn.exe",
+      executableName: "bluenote-term.exe",
       executableDestinationName: "bluenote-term.exe",
     }
   }
@@ -30,7 +30,7 @@ function detectBuiltTuiAsset(platform: NodeJS.Platform, arch: string): BuiltTuiA
     return {
       platformId: "linux-x64",
       archiveExtension: ".tar.gz",
-      executableName: "bn",
+      executableName: "bluenote-term",
       executableDestinationName: "bluenote-term",
     }
   }
