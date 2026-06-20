@@ -1066,6 +1066,7 @@ async function testCommandDiscovery() {
   assert.equal(findCommandOnPath('missing-client', { path: tempBin, platform: 'linux' }), undefined);
 
   const winBin = makeTempDir('path-win-bin');
+  writeExecutable(path.join(winBin, 'bluenote-webui'));
   const winPath = path.join(winBin, 'bluenote-webui.CMD');
   writeExecutable(winPath);
   assert.deepEqual(findCommandOnPath('bluenote-webui', {
@@ -1557,6 +1558,7 @@ async function testWindowsClientLaunchUsesShellForCmdShims() {
   const tempBin = makeTempDir('client-win-launch');
   const { root, env } = makeDaemonEnv();
   try {
+    writeExecutable(path.join(tempBin, 'bluenote-webui'));
     const webPath = path.join(tempBin, 'bluenote-webui.CMD');
     writeExecutable(webPath);
     const started = await runCli(['daemon', 'start'], { env });

@@ -55,7 +55,7 @@ function windowsCandidates(command: string, pathext: string): string[] {
     .split(";")
     .map((extension) => extension.trim())
     .filter(Boolean)
-  return [command, ...extensions.map((extension) => `${command}${extension}`)]
+  return [...extensions.map((extension) => `${command}${extension}`), command]
 }
 
 export function findCommandOnPath(command: string, options: CommandDiscoveryOptions = {}): CommandResolution | undefined {
