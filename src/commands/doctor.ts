@@ -103,8 +103,8 @@ export async function runDoctor(args: string[] = [], io: CommandIo = {}): Promis
     const handshake = daemon.state === "running" && daemon.metadata
       ? runClientCheck(resolution.path, ["--check-daemon"], io, platform, clientEnv)
       : undefined
-    const status = version.ok && (tuiRuntime?.ok ?? true) ? resolution.mode : "broken"
-    if (client === "bluenote-term" && resolution.mode === "built" && status === "built") builtTuiAvailable = true
+    const status = version.ok ? resolution.mode : "broken"
+    if (client === "bluenote-term" && resolution.mode === "built" && version.ok) builtTuiAvailable = true
 
     write(stdout, `  ${client}: ${status}\n`)
     write(stdout, `    path: ${resolution.path}\n`)

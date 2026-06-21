@@ -1410,8 +1410,10 @@ async function testDoctorReportsClientRuntimeModes() {
   const tempBin = makeTempDir('doctor-mode-path');
   const builtDir = makeTempDir('doctor-mode-built');
   const pathTerm = path.join(tempBin, 'bluenote-term');
+  const pathWebui = path.join(tempBin, 'bluenote-webui');
   const builtTerm = path.join(builtDir, 'bluenote-term');
   writeExecutable(pathTerm);
+  writeExecutable(pathWebui);
   writeExecutable(builtTerm);
 
   const built = await runCli(['doctor'], {
@@ -1456,6 +1458,25 @@ async function testDoctorReportsClientRuntimeModes() {
   assert.match(pathFlag.stdout, /bluenote-term: path/);
   assert.match(pathFlag.stdout, new RegExp(escapeRegExp(pathTerm)));
   assert.match(pathFlag.stdout, /tui runtime: ok/);
+
+  const configRoot = makeTempDir('doctor-persisted-built-webui');
+  const configDir = path.join(configRoot, 'bluenote');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${builtDir}\n`);
+  const persistedBuilt = await runCli(['doctor'], {
+    nodeVersion: '18.19.0',
+    platform: 'linux',
+    env: { ...process.env, PATH: tempBin, BLUENOTE_CONFIG_HOME: configRoot },
+    spawnSync(command) {
+      if (command === 'bun') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '1.0.0\n', stderr: '' };
+    },
+  });
+  assert.equal(persistedBuilt.code, 0);
+  assert.match(persistedBuilt.stdout, /bluenote-term: built/);
+  assert.match(persistedBuilt.stdout, new RegExp(escapeRegExp(builtTerm)));
+  assert.match(persistedBuilt.stdout, /bluenote-webui: path/);
+  assert.match(persistedBuilt.stdout, new RegExp(escapeRegExp(pathWebui)));
 
   let spawnCalled = false;
   const invalidMode = await runCli(['doctor'], {
@@ -1507,7 +1528,7 @@ async function testDoctorReportsBrokenClients() {
   assert.equal(found.code, 0);
   assert.match(found.stdout, /bluenote-webui: broken/);
   assert.match(found.stdout, /version: unavailable/);
-  assert.match(found.stdout, /bluenote-term: broken/);
+  assert.match(found.stdout, /bluenote-term: path/);
   assert.match(found.stdout, /tui runtime: unavailable/);
 }
 
@@ -2162,6 +2183,17 @@ async function testWindowsClientLaunchUsesShellForCmdShims() {
     assert.match(calls[0].command, /cmd(.exe)?$/i);
     assert.equal(calls[0].args.slice(0, 3).join(' '), '/d /s /c');
     assert.match(calls[0].args[3], /bluenote-webui\.CMD/i);
+
+    const configDir = path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'client-mode.env'), `BLUENOTE_CLIENT_MODE=built\nBLUENOTE_BUILT_CLIENT_DIR=${path.join(root, 'clients')}\n`);
+    const persistedResult = await runCli(['web'], {
+      env: { ...env, PATH: tempBin, PATHEXT: '.COM;.EXE;.BAT;.CMD' },
+      platform: 'win32',
+      spawn,
+    });
+    assert.equal(persistedResult.code, 0);
+    assert.match(calls.at(-1).args[3], /bluenote-webui\.CMD/i);
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });

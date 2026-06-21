@@ -25,6 +25,10 @@ export type ClientCommandDiscoveryOptions = CommandDiscoveryOptions & {
   builtClientDir?: string
 }
 
+function shouldUsePersistedModeForCommand(command: string): boolean {
+  return command === "bluenote-term"
+}
+
 type PersistedClientMode = {
   mode?: string
   builtClientDir?: string
@@ -163,7 +167,8 @@ function findBuiltClient(command: string, options: ClientCommandDiscoveryOptions
 export function resolveClientCommand(command: string, options: ClientCommandDiscoveryOptions = {}): ClientCommandResolution | undefined {
   const env = options.env || process.env
   const persisted = readPersistedClientMode(env)
-  const configuredMode = options.clientMode && options.clientMode !== "auto" ? options.clientMode : env.BLUENOTE_CLIENT_MODE || persisted.mode
+  const persistedMode = shouldUsePersistedModeForCommand(command) ? persisted.mode : undefined
+  const configuredMode = options.clientMode && options.clientMode !== "auto" ? options.clientMode : env.BLUENOTE_CLIENT_MODE || persistedMode
   const mode = normalizeClientRuntimeMode(configuredMode)
   const platform = options.platform || process.platform
   const pathext = options.pathext !== undefined ? options.pathext : env.PATHEXT
