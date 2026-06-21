@@ -6,6 +6,12 @@ import path from "path"
 
 import { getClientModeConfigPath, readPersistedClientMode } from "./command-discovery"
 
+export type LegacyPortableCleanupResult = {
+  removed: boolean
+  skippedReason?: string
+  removedPath?: string
+}
+
 const TERM_RELEASE_REPO = "LordierClaw/bluenote-term"
 
 type SyncSpawn = typeof import("child_process").spawnSync
@@ -103,9 +109,9 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
-async function resolveReleaseArchivePath(env: NodeJS.ProcessEnv, asset: BuiltTuiAsset): Promise<string> {
+async function resolveReleaseArchivePath(env: NodeJS.ProcessEnv, asset: BuiltTuiAsset): Promise<{ archivePath: string; cleanupDir?: string }> {
   if (env.BLUENOTE_TERM_RELEASE_ARCHIVE_PATH) {
-    return env.BLUENOTE_TERM_RELEASE_ARCHIVE_PATH
+    return { archivePath: env.BLUENOTE_TERM_RELEASE_ARCHIVE_PATH }
   }
 
   const releaseJsonUrl = env.BLUENOTE_TERM_RELEASE_JSON_URL || `https://api.github.com/repos/${TERM_RELEASE_REPO}/releases/latest`
@@ -121,15 +127,14 @@ async function resolveReleaseArchivePath(env: NodeJS.ProcessEnv, asset: BuiltTui
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bluenote-term-release-"))
   const archivePath = path.join(tempDir, matchedAsset.name || `bluenote-${expectedSuffix}`)
   await download(matchedAsset.browser_download_url, archivePath)
-  return archivePath
+  return { archivePath, cleanupDir: tempDir }
 }
 
 function psSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-function extractArchivePackageDir(archivePath: string, asset: BuiltTuiAsset, spawnSync: SyncSpawn): string {
-  const extractRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bluenote-term-extract-"))
+function extractArchivePackageDir(archivePath: string, extractRoot: string, asset: BuiltTuiAsset, spawnSync: SyncSpawn): string {
   const extractedPackageDir = path.join(extractRoot, "bluenote")
   if (asset.archiveExtension === ".zip") {
     runSpawnSync(spawnSync, "powershell", [
@@ -172,6 +177,105 @@ function copyExtractedPackageContents(packageDir: string, destinationDir: string
   return executablePath
 }
 
+function readTrimmedSpawnOutput(spawnSync: SyncSpawn, command: string, args: string[], env: NodeJS.ProcessEnv): string | undefined {
+  const result = spawnSync(command, args, { encoding: "utf8", env })
+  if (result.error || result.status !== 0) return undefined
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : ""
+  return stdout || undefined
+}
+
+function isLegacyPortableExecutableName(candidatePath: string, platform: NodeJS.Platform): boolean {
+  const basename = path.basename(candidatePath)
+  if (platform === "win32") return basename.toLowerCase() === "bn.exe"
+  return basename === "bn"
+}
+
+function directoryLooksLikeLegacyPortableArtifact(directoryPath: string): boolean {
+  const sqlWasmPath = path.join(directoryPath, "sql-wasm.wasm")
+  const readmePath = path.join(directoryPath, "README.txt")
+  if (!fs.existsSync(sqlWasmPath) || !fs.existsSync(readmePath)) return false
+  try {
+    const readme = fs.readFileSync(readmePath, "utf8")
+    return /bluenote/i.test(readme) && /portable|legacy\s+bn|standalone/i.test(readme)
+  } catch {
+    return false
+  }
+}
+
+function isWritableDirectory(directoryPath: string): boolean {
+  try {
+    fs.accessSync(directoryPath, fs.constants.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
+  const relativePath = path.relative(path.resolve(directoryPath), path.resolve(candidatePath))
+  return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+}
+
+function npmGlobalBinDirectories(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, spawnSync: SyncSpawn): string[] {
+  const prefixes = [
+    readTrimmedSpawnOutput(spawnSync, "npm", ["prefix", "-g"], env),
+    readTrimmedSpawnOutput(spawnSync, "npm", ["config", "get", "prefix"], env),
+  ].filter((value): value is string => Boolean(value))
+  const directories = new Set<string>()
+  for (const prefix of prefixes) {
+    directories.add(path.resolve(prefix))
+    if (platform === "win32") {
+      directories.add(path.resolve(prefix))
+      directories.add(path.resolve(prefix, "node_modules", ".bin"))
+    } else {
+      directories.add(path.resolve(prefix, "bin"))
+    }
+  }
+  return [...directories]
+}
+
+export function tryRemoveStaleLegacyPortableClient(options: {
+  candidatePath: string
+  env?: NodeJS.ProcessEnv
+  platform?: NodeJS.Platform
+  spawnSync?: SyncSpawn
+  currentExecutablePath?: string
+}): LegacyPortableCleanupResult {
+  const env = options.env || process.env
+  const platform = options.platform || process.platform
+  const spawnSync = options.spawnSync || defaultSpawnSync
+  const candidatePath = path.resolve(options.candidatePath)
+  const candidateDir = path.dirname(candidatePath)
+
+  if (!isLegacyPortableExecutableName(candidatePath, platform)) return { removed: false }
+  if (!directoryLooksLikeLegacyPortableArtifact(candidateDir)) return { removed: false, skippedReason: "portable artifact markers were inconclusive" }
+  if (!isWritableDirectory(candidateDir)) return { removed: false, skippedReason: "candidate directory is not user-writable" }
+
+  if (options.currentExecutablePath) {
+    try {
+      if (fs.realpathSync(options.currentExecutablePath) === fs.realpathSync(candidatePath)) {
+        return { removed: false, skippedReason: "candidate matches the current distribution binary" }
+      }
+    } catch {
+      if (path.resolve(options.currentExecutablePath) === candidatePath) {
+        return { removed: false, skippedReason: "candidate matches the current distribution binary" }
+      }
+    }
+  }
+
+  const npmBinDirs = npmGlobalBinDirectories(env, platform, spawnSync)
+  if (npmBinDirs.some((directoryPath) => isWithinDirectory(candidatePath, directoryPath))) {
+    return { removed: false, skippedReason: "candidate is inside an npm global bin/shim directory" }
+  }
+
+  try {
+    fs.rmSync(candidatePath, { force: true })
+    return { removed: true, removedPath: candidatePath }
+  } catch (error) {
+    return { removed: false, skippedReason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export async function installManagedBuiltTuiClient(options: {
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
@@ -197,11 +301,16 @@ export async function installManagedBuiltTuiClient(options: {
     executablePath = path.join(builtClientDir, asset.executableDestinationName)
     fs.copyFileSync(env.BLUENOTE_TERM_ARTIFACT_PATH, executablePath)
   } else {
-    const archivePath = await resolveReleaseArchivePath(env, asset)
-    const extractedPackageDir = extractArchivePackageDir(archivePath, asset, spawnSync)
-    executablePath = copyExtractedPackageContents(extractedPackageDir, builtClientDir, asset, platform)
-    fs.rmSync(path.dirname(archivePath), { recursive: true, force: true })
-    fs.rmSync(path.dirname(extractedPackageDir), { recursive: true, force: true })
+    const { archivePath, cleanupDir } = await resolveReleaseArchivePath(env, asset)
+    const extractRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bluenote-term-extract-"))
+    let extractedPackageDir: string | undefined
+    try {
+      extractedPackageDir = extractArchivePackageDir(archivePath, extractRoot, asset, spawnSync)
+      executablePath = copyExtractedPackageContents(extractedPackageDir, builtClientDir, asset, platform)
+    } finally {
+      if (cleanupDir) fs.rmSync(cleanupDir, { recursive: true, force: true })
+      fs.rmSync(extractRoot, { recursive: true, force: true })
+    }
   }
 
   if (platform !== "win32") fs.chmodSync(executablePath, 0o755)

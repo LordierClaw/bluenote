@@ -713,6 +713,109 @@ Expected: only scoped changes in `bluenote` and `bluenote-term`, plus parent `.a
 
 ---
 
+## Task 10: Auto-clean up stale legacy portable `bn` binaries during built-client repair
+
+**Files:**
+- Modify: `/root/code/bluenote/src/commands/tui.ts`
+- Modify: `/root/code/bluenote/src/utils/built-tui-install.ts`
+- Modify: `/root/code/bluenote/src/utils/command-discovery.ts` only if a reusable PATH-helper is needed
+- Modify: `/root/code/bluenote/tests/run-tests.js`
+- Modify docs/help only if user-facing cleanup messaging changes materially
+
+**Goal:** When `bluenote tui` detects an installed PATH `bn`/`bluenote-term` client that is actually a stale legacy portable TUI binary, aggressively clean it up **only when it is clearly identified as the old BlueNote portable binary and only in locations the current user can safely mutate**, then continue by installing the managed built client.
+
+**Safety constraints:**
+
+- Never delete arbitrary PATH entries or npm-managed shims by filename alone.
+- Only remove a stale binary when all of these are true:
+  - the candidate is discovered from PATH while resolving the TUI client for `auto` mode repair,
+  - the runtime probe failed,
+  - the candidate path basename is the legacy portable executable name for that platform (`bn` or `bn.exe`),
+  - the file contents or nearby release markers identify it as a BlueNote portable artifact (for example adjacent `sql-wasm.wasm`, `README.txt`, and/or portable-release readme text),
+  - the directory is user-writable and not an npm global shim directory for the active install,
+  - the path is not the currently executing `bluenote` distribution binary.
+- If any safety check is inconclusive, do **not** delete. Fall back to warning + managed built-client install.
+
+**Step 1: Write failing tests first**
+
+Add focused tests in `/root/code/bluenote/tests/run-tests.js` around the existing TUI auto-install coverage:
+
+- A fixture helper that creates a legacy portable package directory containing:
+  - `bn` (or platform-equivalent legacy name),
+  - `README.txt` with the old portable release wording,
+  - `sql-wasm.wasm`.
+- A test where PATH resolution finds that stale `bn`, `--probe-tui-runtime` fails, cleanup is allowed, and `bluenote tui --smoke`:
+  - removes the stale legacy binary,
+  - installs the managed built client,
+  - launches the managed built client instead.
+- A negative test where probe fails for a PATH binary that is **not** clearly the legacy portable artifact; verify it is **not** deleted and the command emits a warning before falling back.
+- A negative test where the candidate lives under an npm-managed bin/shim location fixture; verify it is **not** deleted.
+
+Suggested assertions:
+
+- stale legacy `bn` no longer exists after repair
+- managed built `bluenote-term` exists and is launched
+- stderr includes an explicit cleanup message such as `Removed stale legacy BlueNote portable binary:`
+- non-deletable candidates remain on disk and emit `Found stale-looking PATH client but skipped automatic cleanup:` or equivalent
+
+**Step 2: Run RED test**
+
+Command:
+
+```sh
+cd /root/code/bluenote && npm run build && node tests/run-tests.js
+```
+
+Expected: FAIL because no cleanup logic exists yet.
+
+**Step 3: Implement the minimal cleanup boundary**
+
+Add a narrow cleanup helper near the built-client repair path. Preferred shape:
+
+```ts
+type LegacyPortableCleanupResult = {
+  removed: boolean
+  skippedReason?: string
+  removedPath?: string
+}
+
+function tryRemoveStaleLegacyPortableClient(...): LegacyPortableCleanupResult
+```
+
+Implementation guidance:
+
+- Keep detection local to the distribution repo; do not add cleanup logic to `bluenote-term` install scripts.
+- Inspect the PATH candidate’s directory for portable-release markers before deleting.
+- Treat deletion as best-effort: if removal fails, report the reason and continue with built-client install instead of aborting.
+- Preserve the existing `bluenote tui` self-healing flow: probe PATH client → optional safe cleanup → install managed built client → launch managed client.
+
+**Step 4: Run GREEN tests**
+
+Commands:
+
+```sh
+cd /root/code/bluenote && npm run build && node tests/run-tests.js
+cd /root/code/bluenote && npm run check
+```
+
+Expected: PASS.
+
+**Step 5: Smoke the release-repair behavior**
+
+Add or run a targeted smoke path proving the built-client repair still writes the persisted built-client mode config and prefers the managed client after cleanup.
+
+**Step 6: Checkpoint**
+
+Run:
+
+```sh
+git -C /root/code/bluenote status --short
+```
+
+Report changed files, exact cleanup safety rules implemented, and verification output.
+
+---
+
 ## Final review checklist
 
 Before declaring the branch ready:
@@ -730,6 +833,7 @@ Before declaring the branch ready:
   - `cd /root/code/bluenote && npm run check`
   - `cd /root/code/bluenote-term && bun run check`
   - smoke commands from Task 9.
+  - stale-legacy-binary repair coverage from Task 10 when that task is in scope.
 
 ## Execution mode options
 

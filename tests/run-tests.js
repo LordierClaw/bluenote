@@ -60,6 +60,30 @@ function createBuiltTuiArchive() {
   return { root, archivePath };
 }
 
+function createMalformedBuiltTuiArchive() {
+  const root = makeTempDir('built-tui-archive-malformed');
+  const packageDir = path.join(root, 'bluenote');
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.writeFileSync(path.join(packageDir, 'README.txt'), 'malformed portable archive');
+  const archivePath = path.join(root, 'bluenote-vtest-linux-x64.tar.gz');
+  const packed = childProcess.spawnSync('tar', ['-czf', archivePath, '-C', root, 'bluenote'], { encoding: 'utf8' });
+  assert.equal(packed.status, 0, packed.stderr);
+  return { root, archivePath };
+}
+
+function createLegacyPortableTuiDir(options = {}) {
+  const root = makeTempDir('legacy-portable-tui');
+  const executableName = options.executableName || (process.platform === 'win32' ? 'bn.exe' : 'bn');
+  const readmeText = options.readmeText || [
+    'BlueNote portable terminal release',
+    'This portable package bundles the legacy bn launcher.',
+  ].join('\n');
+  writeExecutable(path.join(root, executableName), options.executableContent || '#!/usr/bin/env bash\nexit 0\n');
+  fs.writeFileSync(path.join(root, 'README.txt'), readmeText);
+  fs.writeFileSync(path.join(root, 'sql-wasm.wasm'), 'wasm-placeholder');
+  return { root, executablePath: path.join(root, executableName), executableName };
+}
+
 function makeDaemonEnv() {
   const root = makeTempDir('daemon-env');
   const env = {
@@ -1812,12 +1836,229 @@ async function testTuiAutoInstallsBuiltClientWhenPathPackageCannotRun() {
     assert.ok(fs.existsSync(path.join(builtDir, 'bluenote-term')));
     assert.ok(!fs.existsSync(path.join(builtDir, 'bn')));
     assert.ok(fs.existsSync(path.join(builtDir, 'sql-wasm.wasm')));
+    assert.ok(fs.existsSync(archive.root), 'expected supplied archive parent directory to survive install');
     const recordPath = path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'client-mode.env');
     assert.match(fs.readFileSync(recordPath, 'utf8'), /BLUENOTE_CLIENT_MODE=built/);
     assert.match(fs.readFileSync(recordPath, 'utf8'), new RegExp(escapeRegExp(builtDir)));
   } finally {
     await runCli(['daemon', 'stop'], { env });
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiBuiltClientInstallFailureCleansUpExtractTempDir() {
+  const archive = createMalformedBuiltTuiArchive();
+  const builtDir = makeTempDir('client-auto-install-built-malformed');
+  const { root, env } = makeDaemonEnv();
+  const countExtractDirs = () => fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('bluenote-term-extract-')).length;
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const before = countExtractDirs();
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: process.env.PATH || '',
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+      },
+    });
+    const after = countExtractDirs();
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Unable to install the built BlueNote terminal artifact automatically:/);
+    assert.equal(after, before, 'expected malformed archive install to clean up extract temp directories');
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiDoesNotCleanupLegacyPortableBnWithoutProbeFailure() {
+  const portable = createLegacyPortableTuiDir({ executableName: 'bn' });
+  const builtDir = makeTempDir('client-auto-install-built-no-probe-cleanup');
+  const archive = createBuiltTuiArchive();
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: `${portable.root}${path.delimiter}${process.env.PATH || ''}`,
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+      },
+      spawn,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(fs.existsSync(portable.executablePath), 'expected legacy portable bn to remain when no runtime probe failed');
+    assert.doesNotMatch(result.stderr, /Removed stale legacy BlueNote portable binary:/);
+    assert.doesNotMatch(result.stderr, /Found stale-looking PATH client but skipped automatic cleanup:/);
+    assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(portable.root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiAutoInstallsBuiltClientAfterRemovingStaleLegacyPortableBn() {
+  const portable = createLegacyPortableTuiDir({ executableName: 'bn' });
+  const builtDir = makeTempDir('client-auto-install-built-cleanup');
+  const archive = createBuiltTuiArchive();
+  const { root, env } = makeDaemonEnv();
+  try {
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    function spawnSync(command, args, options) {
+      if (command === portable.executablePath && args.includes('--probe-tui-runtime')) {
+        return { status: 1, stdout: '', stderr: 'runtime unavailable' };
+      }
+      return childProcess.spawnSync(command, args, options);
+    }
+
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: portable.root,
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+      },
+      spawn,
+      spawnSync,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(!fs.existsSync(portable.executablePath), 'expected stale legacy portable bn to be removed');
+    assert.match(result.stderr, /Removed stale legacy BlueNote portable binary:/);
+    assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
+    assert.deepEqual(calls[0].args, ['--smoke']);
+    assert.ok(fs.existsSync(path.join(builtDir, 'bluenote-term')));
+    assert.ok(fs.existsSync(path.join(builtDir, 'sql-wasm.wasm')));
+    const recordPath = path.join(env.BLUENOTE_CONFIG_HOME, 'bluenote', 'client-mode.env');
+    assert.match(fs.readFileSync(recordPath, 'utf8'), /BLUENOTE_CLIENT_MODE=built/);
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(portable.root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiSkipsLegacyPortableCleanupWhenMarkersAreInconclusive() {
+  const portable = createLegacyPortableTuiDir({ executableName: 'bn' });
+  const builtDir = makeTempDir('client-auto-install-built-skip');
+  const archive = createBuiltTuiArchive();
+  const { root, env } = makeDaemonEnv();
+  try {
+    fs.rmSync(path.join(portable.root, 'README.txt'));
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    function spawnSync(command, args, options) {
+      if (command === portable.executablePath && args.includes('--probe-tui-runtime')) {
+        return { status: 1, stdout: '', stderr: 'runtime unavailable' };
+      }
+      return childProcess.spawnSync(command, args, options);
+    }
+
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: portable.root,
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+      },
+      spawn,
+      spawnSync,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(fs.existsSync(portable.executablePath), 'expected inconclusive bn candidate to remain on disk');
+    assert.match(result.stderr, /Found stale-looking PATH client but skipped automatic cleanup:/);
+    assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(portable.root, { recursive: true, force: true });
+    fs.rmSync(archive.root, { recursive: true, force: true });
+  }
+}
+
+async function testTuiSkipsLegacyPortableCleanupInsideNpmManagedBinDir() {
+  const npmPrefix = makeTempDir('client-auto-install-npm-prefix');
+  const npmBin = path.join(npmPrefix, 'bin');
+  const portable = createLegacyPortableTuiDir({ executableName: 'bn' });
+  const archive = createBuiltTuiArchive();
+  const builtDir = makeTempDir('client-auto-install-built-npm-skip');
+  const { root, env } = makeDaemonEnv();
+  try {
+    fs.mkdirSync(npmBin, { recursive: true });
+    const npmPortablePath = path.join(npmBin, 'bn');
+    fs.copyFileSync(portable.executablePath, npmPortablePath);
+    fs.copyFileSync(path.join(portable.root, 'README.txt'), path.join(npmBin, 'README.txt'));
+    fs.copyFileSync(path.join(portable.root, 'sql-wasm.wasm'), path.join(npmBin, 'sql-wasm.wasm'));
+    fs.chmodSync(npmPortablePath, 0o755);
+    const fakeNpmBin = makeTempDir('client-auto-install-fake-npm-bin');
+    writeFakeNpm(fakeNpmBin);
+    const started = await runCli(['daemon', 'start'], { env });
+    assert.equal(started.code, 0);
+    const calls = [];
+    function spawn(command, args, options) {
+      calls.push({ command, args, options });
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0));
+      return child;
+    }
+    function spawnSync(command, args, options) {
+      if (command === npmPortablePath && args.includes('--probe-tui-runtime')) {
+        return { status: 1, stdout: '', stderr: 'runtime unavailable' };
+      }
+      return childProcess.spawnSync(command, args, options);
+    }
+
+    const result = await runCli(['tui', '--smoke'], {
+      env: {
+        ...env,
+        PATH: `${npmBin}${path.delimiter}${fakeNpmBin}${path.delimiter}${process.env.PATH || ''}`,
+        BLUENOTE_BUILT_CLIENT_DIR: builtDir,
+        BLUENOTE_TERM_RELEASE_ARCHIVE_PATH: archive.archivePath,
+        BLUENOTE_TEST_NPM_PREFIX: npmPrefix,
+      },
+      spawn,
+      spawnSync,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(fs.existsSync(npmPortablePath), 'expected npm-managed shim candidate to remain on disk');
+    assert.match(result.stderr, /Found stale-looking PATH client but skipped automatic cleanup:/);
+    assert.equal(calls[0].command, path.join(builtDir, 'bluenote-term'));
+  } finally {
+    await runCli(['daemon', 'stop'], { env });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(npmPrefix, { recursive: true, force: true });
+    fs.rmSync(portable.root, { recursive: true, force: true });
     fs.rmSync(archive.root, { recursive: true, force: true });
   }
 }
@@ -2050,6 +2291,11 @@ const tests = [
   testClientLaunchUsesPathAndDaemonEnv,
   testClientLaunchUsesBuiltAndPathModes,
   testTuiAutoInstallsBuiltClientWhenPathPackageCannotRun,
+  testTuiBuiltClientInstallFailureCleansUpExtractTempDir,
+  testTuiDoesNotCleanupLegacyPortableBnWithoutProbeFailure,
+  testTuiAutoInstallsBuiltClientAfterRemovingStaleLegacyPortableBn,
+  testTuiSkipsLegacyPortableCleanupWhenMarkersAreInconclusive,
+  testTuiSkipsLegacyPortableCleanupInsideNpmManagedBinDir,
   testBuiltModeMissingClientMessage,
   testClientModeValidation,
   testClientLaunchRejectsStaleDaemonMetadataBeforeSpawning,

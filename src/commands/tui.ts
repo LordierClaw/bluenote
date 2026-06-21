@@ -1,8 +1,8 @@
 import { spawn as defaultSpawn, spawnSync as defaultSpawnSync } from "child_process"
 
 import type { CommandIo } from "../types"
-import { installManagedBuiltTuiClient } from "../utils/built-tui-install"
-import { parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
+import { installManagedBuiltTuiClient, tryRemoveStaleLegacyPortableClient } from "../utils/built-tui-install"
+import { findCommandOnPath, parseClientModeArgs, resolveClientCommand } from "../utils/command-discovery"
 import { readDaemonStatus } from "../utils/daemon-state"
 import { buildWindowsShimInvocation, isWindowsShellShim } from "../utils/windows-shim"
 import { write } from "../utils/write"
@@ -43,6 +43,23 @@ async function installBuiltTui(io: CommandIo, env: NodeJS.ProcessEnv): Promise<{
   return { command: "bluenote-term", path: installed.executablePath, mode: "built" }
 }
 
+function maybeCleanStaleLegacyPortableCandidate(commandPath: string, io: CommandIo, env: NodeJS.ProcessEnv): void {
+  const cleanup = tryRemoveStaleLegacyPortableClient({
+    candidatePath: commandPath,
+    env,
+    platform: io.platform || process.platform,
+    spawnSync: io.spawnSync || defaultSpawnSync,
+    currentExecutablePath: process.argv[1],
+  })
+  if (cleanup.removed && cleanup.removedPath) {
+    write(io.stderr || process.stderr, `Removed stale legacy BlueNote portable binary: ${cleanup.removedPath}\n`)
+    return
+  }
+  if (cleanup.skippedReason) {
+    write(io.stderr || process.stderr, `Found stale-looking PATH client but skipped automatic cleanup: ${cleanup.skippedReason}\n`)
+  }
+}
+
 export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<number> {
   const env = io.env || process.env
   const daemon = await readDaemonStatus(env)
@@ -57,6 +74,15 @@ export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<n
   let activeResolution = resolveClientCommand("bluenote-term", { env, clientMode: parsed.mode, platform: io.platform || process.platform, pathext: env.PATHEXT })
   if (!activeResolution) {
     if (parsed.mode === "auto") {
+      const legacyPortableCandidate = findCommandOnPath("bn", { path: env.PATH, platform: io.platform || process.platform, pathext: env.PATHEXT })
+      if (legacyPortableCandidate) {
+        const probe = probeTuiRuntime(legacyPortableCandidate.path, {
+          ...env,
+          BLUENOTE_DAEMON_URL: metadata.url,
+          BLUENOTE_DAEMON_TOKEN: metadata.token,
+        }, io)
+        if (!probe.ok) maybeCleanStaleLegacyPortableCandidate(legacyPortableCandidate.path, io, env)
+      }
       try {
         activeResolution = await installBuiltTui(io, env)
       } catch (error) {
@@ -77,6 +103,7 @@ export async function runTui(args: string[] = [], io: CommandIo = {}): Promise<n
     }, io)
     if (!probe.ok) {
       write(io.stderr || process.stderr, "Installed npm bluenote-term cannot launch the full TUI here.\n")
+      maybeCleanStaleLegacyPortableCandidate(activeResolution.path, io, env)
       try {
         activeResolution = await installBuiltTui(io, env)
       } catch (error) {
