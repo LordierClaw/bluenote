@@ -8,6 +8,7 @@ This repo owns:
 
 - top-level `bluenote`/`bn` command routing
 - the normal note-management CLI: `init`, `new`, `list`, `show`, `search`, `edit`, `archive`, `delete`, and `rebuild`
+- sync setup commands: `sync server start`, `sync link`, `sync now`, `sync status`, and `sync unlink`
 - `--help`, `version`, and `doctor`
 - minimal local daemon lifecycle and capability reporting
 - optional client discovery in explicit `auto`, `path`, and `built` runtime modes
@@ -78,6 +79,26 @@ bluenote list
 bluenote show <key|path>
 bluenote search kickoff
 ```
+
+### Remote sync core setup
+
+Run a BlueNote root as the server-authoritative sync core on a remote machine:
+
+```sh
+BLUENOTE_ROOT=/srv/bluenote bluenote init
+BLUENOTE_ROOT=/srv/bluenote bluenote sync server start --host 0.0.0.0 --port 8765
+```
+
+Then link each PC/client root to that server and sync on demand:
+
+```sh
+BLUENOTE_ROOT=$HOME/notes bluenote init
+BLUENOTE_ROOT=$HOME/notes bluenote sync link --server http://remote-host:8765 --replica-id laptop
+BLUENOTE_ROOT=$HOME/notes bluenote sync now
+BLUENOTE_ROOT=$HOME/notes bluenote sync status
+```
+
+Repeat `sync link` + `sync now` on another PC with a different `--replica-id` to clone the server workspace. Normal local note commands remain local-first; `sync now` pushes pending local changes and pulls server changes. The first release of this command surface provides manual/on-demand sync; background autosync can be layered on top by a scheduler or future daemon work.
 
 For end-user TUI usage, prefer the installer-managed or auto-downloaded built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
 
@@ -225,6 +246,7 @@ The distribution package consumes the latest published `@lordierclaw/bluenote-co
 - Basic distribution commands do not require Bun.
 - The terminal client uses Bun/OpenTUI and should be installed separately.
 - The daemon is local-only and passes client connection details through environment variables without printing bearer tokens.
+- `bluenote sync server start` exposes the current root as an unauthenticated HTTP sync endpoint. Use it on a trusted network or behind your own SSH tunnel/reverse proxy until authenticated remote sync is added.
 - Use `bluenote doctor` after install/link changes to verify PATH, daemon state, and optional clients.
 
 ## Related packages

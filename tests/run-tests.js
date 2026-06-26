@@ -2200,6 +2200,87 @@ async function testWindowsClientLaunchUsesShellForCmdShims() {
   }
 }
 
+
+async function waitForServerReady(child) {
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 10000) {
+    const match = stdout.match(/BlueNote sync server listening: (http:\/\/[^\n]+)/);
+    if (match) return { url: match[1].trim(), stdout: () => stdout, stderr: () => stderr };
+    if (child.exitCode !== null) throw new Error(`sync server exited early code=${child.exitCode}\nstdout=${stdout}\nstderr=${stderr}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`sync server did not become ready\nstdout=${stdout}\nstderr=${stderr}`);
+}
+
+async function testDistributionSyncServerAndClients() {
+  const serverRoot = makeTempDir('sync-server-root');
+  const clientA = makeTempDir('sync-client-a');
+  const clientB = makeTempDir('sync-client-b');
+  const binPath = path.join(__dirname, '..', 'dist', 'bin.js');
+  const server = childProcess.spawn(process.execPath, [binPath, 'sync', 'server', 'start', '--host', '127.0.0.1', '--port', '0'], {
+    env: { ...process.env, BLUENOTE_ROOT: serverRoot },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  try {
+    const ready = await waitForServerReady(server);
+    const serverUrl = ready.url;
+
+    const runA = (args) => runCli(args, { env: { ...process.env, BLUENOTE_ROOT: clientA } });
+    const runB = (args) => runCli(args, { env: { ...process.env, BLUENOTE_ROOT: clientB } });
+
+    assert.equal((await runA(['init'])).code, 0);
+    assert.equal((await runB(['init'])).code, 0);
+
+    const createdA = await runA(['new', '--path', 'note', '--title', 'Remote Alpha', 'Alpha from client A']);
+    assert.equal(createdA.code, 0, createdA.stderr);
+    const keyA = createdA.stdout.match(/Key: ([^\n]+)/)[1];
+
+    const linkA = await runA(['sync', 'link', '--server', serverUrl, '--replica-id', 'client-a']);
+    assert.equal(linkA.code, 0, linkA.stderr);
+    assert.match(linkA.stdout, /Linked sync client/);
+    const syncA = await runA(['sync', 'now']);
+    assert.equal(syncA.code, 0, syncA.stderr);
+    assert.match(syncA.stdout, /Sync synced/);
+
+    const linkB = await runB(['sync', 'link', '--server', serverUrl, '--replica-id', 'client-b']);
+    assert.equal(linkB.code, 0, linkB.stderr);
+    const syncB = await runB(['sync', 'now']);
+    assert.equal(syncB.code, 0, syncB.stderr);
+    const listB = await runB(['list']);
+    assert.equal(listB.code, 0, listB.stderr);
+    assert.match(listB.stdout, /Remote Alpha/);
+    assert.match(listB.stdout, new RegExp(escapeRegExp(keyA)));
+
+    const createdB = await runB(['new', '--path', 'note', '--title', 'Remote Beta', 'Beta from client B']);
+    assert.equal(createdB.code, 0, createdB.stderr);
+    const keyB = createdB.stdout.match(/Key: ([^\n]+)/)[1];
+    assert.equal((await runB(['sync', 'now'])).code, 0);
+    assert.equal((await runA(['sync', 'now'])).code, 0);
+    const listA = await runA(['list']);
+    assert.equal(listA.code, 0, listA.stderr);
+    assert.match(listA.stdout, /Remote Beta/);
+    assert.match(listA.stdout, new RegExp(escapeRegExp(keyB)));
+
+    const status = await runA(['sync', 'status']);
+    assert.equal(status.code, 0, status.stderr);
+    assert.match(status.stdout, /State: linked/);
+    assert.match(status.stdout, new RegExp(escapeRegExp(serverUrl)));
+  } finally {
+    server.kill('SIGTERM');
+    await new Promise((resolve) => server.once('exit', resolve));
+    fs.rmSync(serverRoot, { recursive: true, force: true });
+    fs.rmSync(clientA, { recursive: true, force: true });
+    fs.rmSync(clientB, { recursive: true, force: true });
+  }
+}
+
 async function testMissingClientMessage() {
   const { root, env } = makeDaemonEnv();
   try {
@@ -2307,6 +2388,7 @@ const tests = [
   testVersionDoesNotLoadClients,
   testDoctorDoesNotLoadClients,
   testDistributionNoteCommands,
+  testDistributionSyncServerAndClients,
   testCommandDiscovery,
   testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,

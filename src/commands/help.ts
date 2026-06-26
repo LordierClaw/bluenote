@@ -23,11 +23,13 @@ Note commands:
                             Delete a note permanently
   rebuild                   Rebuild note indexes
   ai <command>              Configure AI and manage AI description jobs
+  sync <command>            Link to a sync server and sync notes
 
 Client and distribution commands:
   tui [...args]             Launch the terminal interface via bluenote-term
   term [...args]            Alias for tui
   web [...args]             Launch the local WebUI via bluenote-webui
+  sync server start         Serve the current root as a remote sync core
   daemon start|status|stop  Manage the local BlueNote daemon
   doctor                    Check runtime, daemon, and optional clients
   version                   Print package versions
@@ -37,6 +39,8 @@ Examples:
   bluenote new "Capture a note"
   bluenote list
   bluenote show <key|path>
+  bluenote sync link --server http://remote:8765
+  bluenote sync now
   bluenote tui
 
 Options:
