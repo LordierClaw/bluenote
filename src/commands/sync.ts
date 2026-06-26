@@ -48,6 +48,7 @@ function usage(): string {
     "  bluenote sync status",
     "  bluenote sync link --server <url> [--workspace-id <id>] [--replica-id <id>]",
     "  bluenote sync now",
+    "  bluenote sync watch [--interval <seconds>]",
     "  bluenote sync unlink",
     "  bluenote sync server start [--host <host>] [--port <port>]",
     "",
@@ -55,6 +56,7 @@ function usage(): string {
     "  bluenote sync server start --host 0.0.0.0 --port 8765",
     "  bluenote sync link --server http://server.example:8765 --replica-id laptop",
     "  bluenote sync now",
+    "  bluenote sync watch --interval 30",
   ].join("\n") + "\n"
 }
 
@@ -71,7 +73,7 @@ function parseOptions(core: CoreModule, args: string[]): { subcommand?: string; 
   const options: Record<string, string | boolean> = {}
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index]
-    if (arg === "--server" || arg === "--workspace-id" || arg === "--replica-id" || arg === "--host" || arg === "--port") {
+    if (arg === "--server" || arg === "--workspace-id" || arg === "--replica-id" || arg === "--host" || arg === "--port" || arg === "--interval") {
       options[arg.slice(2)] = consumeOption(core, rest, index, arg)
       index += 1
       continue
@@ -210,6 +212,38 @@ function formatStatus(status: SyncStatusView, config?: SyncClientConfig): string
   return `${lines.join("\n")}\n`
 }
 
+function runSyncNow(core: CoreModule, rootPath: string, config: SyncClientConfig) {
+  return core.syncCoreNow({ override: rootPath, replicaId: config.replicaId, transport: createSyncHttpTransportSync(core, config.serverUrl) })
+}
+
+function parseWatchInterval(core: CoreModule, value: string | boolean | undefined): number {
+  const seconds = value === undefined ? 30 : Number(value)
+  if (!Number.isFinite(seconds) || seconds < 1) {
+    throw new core.UsageError("Invalid sync watch interval.", { hint: "Use --interval with a number of seconds >= 1." })
+  }
+  return seconds * 1000
+}
+
+async function runWatch(core: CoreModule, rootPath: string, config: SyncClientConfig, intervalMs: number, io: CommandIo): Promise<number> {
+  let stopped = false
+  const stop = () => { stopped = true }
+  process.once("SIGINT", stop)
+  process.once("SIGTERM", stop)
+  write(io.stdout || process.stdout, `Watching sync every ${Math.round(intervalMs / 1000)}s\nServer: ${config.serverUrl}\nReplica: ${config.replicaId}\n`)
+  while (!stopped) {
+    try {
+      const summary = runSyncNow(core, rootPath, config)
+      write(io.stdout || process.stdout, `Sync ${summary.status}; pushed=${summary.pushed}; pulled=${summary.pulled}\n`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      write(io.stderr || process.stderr, `Sync failed: ${message}\n`)
+    }
+    if (stopped) break
+    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return 0
+}
+
 async function startSyncServer(core: CoreModule, args: string[], io: CommandIo): Promise<number> {
   const parsed = parseOptions(core, ["server", ...args])
   const host = String(parsed.options.host ?? "127.0.0.1")
@@ -296,9 +330,13 @@ export async function runSyncCommand(args: string[], io: CommandIo = {}): Promis
     }
     if (parsed.subcommand === "now") {
       const config = readClientConfig(core, rootPath)
-      const summary = core.syncCoreNow({ override: rootPath, replicaId: config.replicaId, transport: createSyncHttpTransportSync(core, config.serverUrl) })
+      const summary = runSyncNow(core, rootPath, config)
       write(io.stdout || process.stdout, `Sync ${summary.status}\nPushed: ${summary.pushed}\nPulled: ${summary.pulled}\n`)
       return summary.status === "synced" || summary.status === "not-linked" ? 0 : 1
+    }
+    if (parsed.subcommand === "watch") {
+      const config = readClientConfig(core, rootPath)
+      return await runWatch(core, rootPath, config, parseWatchInterval(core, parsed.options.interval), io)
     }
     if (parsed.subcommand === "unlink") {
       const summary = core.unlinkCoreSync({ override: rootPath })

@@ -96,9 +96,10 @@ BLUENOTE_ROOT=$HOME/notes bluenote init
 BLUENOTE_ROOT=$HOME/notes bluenote sync link --server http://remote-host:8765 --replica-id laptop
 BLUENOTE_ROOT=$HOME/notes bluenote sync now
 BLUENOTE_ROOT=$HOME/notes bluenote sync status
+BLUENOTE_ROOT=$HOME/notes bluenote sync watch --interval 30
 ```
 
-Repeat `sync link` + `sync now` on another PC with a different `--replica-id` to clone the server workspace. Normal local note commands remain local-first; `sync now` pushes pending local changes and pulls server changes. The first release of this command surface provides manual/on-demand sync; background autosync can be layered on top by a scheduler or future daemon work.
+Repeat `sync link` + `sync now` on another PC with a different `--replica-id` to clone the server workspace. Normal local note commands remain local-first; `sync now` pushes pending local changes and pulls server changes. `sync watch` is a simple foreground/background sync loop suitable for a terminal multiplexer, service manager, or shell background job.
 
 For end-user TUI usage, prefer the installer-managed or auto-downloaded built terminal artifact instead of the npm `@lordierclaw/bluenote-term` PATH package. The npm package is for development/public API consumption and daemon/runtime probing; the full OpenTUI app should run from the built terminal artifact so it does not depend on Bun or Node FFI support at user runtime.
 

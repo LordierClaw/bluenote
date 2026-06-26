@@ -24,6 +24,7 @@ Note commands:
   rebuild                   Rebuild note indexes
   ai <command>              Configure AI and manage AI description jobs
   sync <command>            Link to a sync server and sync notes
+                            Includes sync now and sync watch
 
 Client and distribution commands:
   tui [...args]             Launch the terminal interface via bluenote-term
@@ -41,6 +42,7 @@ Examples:
   bluenote show <key|path>
   bluenote sync link --server http://remote:8765
   bluenote sync now
+  bluenote sync watch --interval 30
   bluenote tui
 
 Options:
