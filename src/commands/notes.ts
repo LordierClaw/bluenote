@@ -259,6 +259,18 @@ function formatSearchMatches(query: string, matches: SearchNoteMatch[]): string 
   }).join("\n\n") + "\n"
 }
 
+function readWithIndexRetry<T>(core: CoreModule, opts: ReturnType<typeof rootOptions>, fn: () => T): T {
+  try {
+    return fn()
+  } catch (error) {
+    if (error instanceof core.AppError && error.code === "INDEX_UNAVAILABLE") {
+      core.rebuildIndexes(opts)
+      return fn()
+    }
+    throw error
+  }
+}
+
 function resolveEditorCommand(core: CoreModule, env: NodeJS.ProcessEnv): string {
   const editor = env.EDITOR?.trim()
   if (!editor) {
@@ -381,12 +393,12 @@ export async function runNoteCommand(command: NoteCommand, args: string[], io: C
           hint: "Run bluenote list [--drafts|--all].",
         })
       }
-      const summaries = core.listNotes({ ...opts, visibility: parsed.visibility })
+      const summaries = readWithIndexRetry(core, opts, () => core.listNotes({ ...opts, visibility: parsed.visibility }))
       const body = summaries.map((summary) => `${summary.title}\t${summary.key}\t${summary.description}\t${summary.relativePath}`).join("\n")
       stdout = body === "" ? "" : `${body}\n`
     } else if (command === "show") {
       const { selector, visibility } = parseSelectorArgs(core, "show", args)
-      const shown = core.showNote({ ...opts, selector, visibility })
+      const shown = readWithIndexRetry(core, opts, () => core.showNote({ ...opts, selector, visibility }))
       stdout = `Title: ${shown.title}\nKey: ${shown.key}\nPath: ${shown.relativePath}\nDescription: ${shown.description}\n\n${shown.body}`
     } else if (command === "search") {
       const parsed = parseVisibilityArgs(core, args)
@@ -396,7 +408,7 @@ export async function runNoteCommand(command: NoteCommand, args: string[], io: C
           hint: 'Run bluenote search [--drafts|--all] "keywords".',
         })
       }
-      stdout = formatSearchMatches(query, core.searchNotes(query, { ...opts, visibility: parsed.visibility }))
+      stdout = formatSearchMatches(query, readWithIndexRetry(core, opts, () => core.searchNotes(query, { ...opts, visibility: parsed.visibility })))
     } else if (command === "edit") {
       stdout = runEdit(core, args, io)
     } else if (command === "archive") {

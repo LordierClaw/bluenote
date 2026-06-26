@@ -2281,6 +2281,72 @@ async function testDistributionSyncServerAndClients() {
   }
 }
 
+
+async function testDistributionSyncWatchAndReadRetry() {
+  const serverRoot = makeTempDir('sync-watch-server-root');
+  const clientA = makeTempDir('sync-watch-client-a');
+  const clientB = makeTempDir('sync-watch-client-b');
+  const binPath = path.join(__dirname, '..', 'dist', 'bin.js');
+  const server = childProcess.spawn(process.execPath, [binPath, 'sync', 'server', 'start', '--host', '127.0.0.1', '--port', '0'], {
+    env: { ...process.env, BLUENOTE_ROOT: serverRoot },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let watchA;
+  let watchB;
+
+  try {
+    const ready = await waitForServerReady(server);
+    const serverUrl = ready.url;
+    const runA = (args) => runCli(args, { env: { ...process.env, BLUENOTE_ROOT: clientA } });
+    const runB = (args) => runCli(args, { env: { ...process.env, BLUENOTE_ROOT: clientB } });
+
+    assert.equal((await runA(['init'])).code, 0);
+    assert.equal((await runB(['init'])).code, 0);
+    assert.equal((await runA(['sync', 'link', '--server', serverUrl, '--replica-id', 'watch-a'])).code, 0);
+    assert.equal((await runB(['sync', 'link', '--server', serverUrl, '--replica-id', 'watch-b'])).code, 0);
+
+    watchA = childProcess.spawn(process.execPath, [binPath, 'sync', 'watch', '--interval', '1'], {
+      env: { ...process.env, BLUENOTE_ROOT: clientA },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    watchB = childProcess.spawn(process.execPath, [binPath, 'sync', 'watch', '--interval', '1'], {
+      env: { ...process.env, BLUENOTE_ROOT: clientB },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const createdA = await runA(['new', '--path', 'note', '--title', 'Watch Alpha', 'Alpha created while watches run']);
+    assert.equal(createdA.code, 0, createdA.stderr);
+    let bList;
+    for (let i = 0; i < 20; i += 1) {
+      bList = await runB(['list']);
+      assert.equal(bList.code, 0, bList.stderr);
+      if (/Watch Alpha/.test(bList.stdout)) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    assert.match(bList.stdout, /Watch Alpha/);
+
+    const createdB = await runB(['new', '--path', 'note', '--title', 'Watch Beta', 'Beta created while watches run']);
+    assert.equal(createdB.code, 0, createdB.stderr);
+    let aList;
+    for (let i = 0; i < 20; i += 1) {
+      aList = await runA(['list']);
+      assert.equal(aList.code, 0, aList.stderr);
+      if (/Watch Beta/.test(aList.stdout)) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    assert.match(aList.stdout, /Watch Beta/);
+  } finally {
+    for (const child of [watchA, watchB, server]) {
+      if (child && child.exitCode === null) child.kill('SIGTERM');
+    }
+    await Promise.all([watchA, watchB, server].filter(Boolean).map((child) => new Promise((resolve) => child.once('exit', resolve))));
+    fs.rmSync(serverRoot, { recursive: true, force: true });
+    fs.rmSync(clientA, { recursive: true, force: true });
+    fs.rmSync(clientB, { recursive: true, force: true });
+  }
+}
+
 async function testMissingClientMessage() {
   const { root, env } = makeDaemonEnv();
   try {
@@ -2389,6 +2455,7 @@ const tests = [
   testDoctorDoesNotLoadClients,
   testDistributionNoteCommands,
   testDistributionSyncServerAndClients,
+  testDistributionSyncWatchAndReadRetry,
   testCommandDiscovery,
   testClientRuntimeModeResolution,
   testDoctorReportsOptionalClients,
